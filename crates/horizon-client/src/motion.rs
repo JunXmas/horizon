@@ -647,10 +647,15 @@ impl PlayerMotion {
         self.dimensions.bounds(self.position)
     }
     pub fn attribute(&mut self, name: &str) -> Result<f64> {
-        let key = self
-            .attributes
-            .key(name)
-            .ok_or_else(|| format!("missing movement attribute {name}"))?;
+        // Attributes 26.1 added, which 1.21.11 lacks: their defaults change nothing.
+        let legacy_default = match name {
+            "minecraft:air_drag_modifier" | "minecraft:friction_modifier" => Some(1.0),
+            "minecraft:bounciness" => Some(0.0),
+            _ => None,
+        };
+        let Some(key) = self.attributes.key(name) else {
+            return legacy_default.ok_or_else(|| format!("missing movement attribute {name}").into());
+        };
         Ok(self
             .attributes
             .value(Some(key), ValueKind::Computed)
