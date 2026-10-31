@@ -34,7 +34,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.util.StrictJsonParser;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ItemOwner;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.decoration.ArmorStand;
@@ -213,7 +213,7 @@ public final class VanillaItemModelOracle {
 
     // --- Scripted owner ---
     static final class Actor extends ArmorStand {
-        boolean using; int remaining; ItemStack stack = ItemStack.EMPTY; HumanoidArm arm = HumanoidArm.RIGHT; EntityType<?> kind = EntityTypes.PLAYER;
+        boolean using; int remaining; ItemStack stack = ItemStack.EMPTY; HumanoidArm arm = HumanoidArm.RIGHT; EntityType<?> kind = EntityType.PLAYER;
         Actor() { super(null, null); }
         @Override public boolean isUsingItem() { return using; }
         @Override public ItemStack getUseItem() { return using ? stack : ItemStack.EMPTY; }

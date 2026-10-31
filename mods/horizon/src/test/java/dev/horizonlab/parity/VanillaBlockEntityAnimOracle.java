@@ -181,7 +181,7 @@ public final class VanillaBlockEntityAnimOracle {
     static Mob mob(JsonObject e, World world) throws Exception {
         Mob m = make(Mob.class);
         m.living = !e.has("alive") || e.get("alive").getAsBoolean();
-        put(m, Entity.class, "type", e.has("raider") && e.get("raider").getAsBoolean() ? EntityTypes.PILLAGER : EntityTypes.COW);
+        put(m, Entity.class, "type", e.has("raider") && e.get("raider").getAsBoolean() ? EntityType.PILLAGER : EntityType.COW);
         var p = e.getAsJsonArray("pos");
         put(m, Entity.class, "position", new Vec3(p.get(0).getAsDouble(), p.get(1).getAsDouble(), p.get(2).getAsDouble()));
         if (e.has("removed") && e.get("removed").getAsBoolean()) put(m, Entity.class, "removalReason", Entity.RemovalReason.KILLED);

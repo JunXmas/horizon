@@ -747,7 +747,7 @@ public final class VanillaNaturalSpawnOracle {
                         put(player, Entity.class, "uuid", new UUID(0L, i + 1));
                         eyeHeight.setFloat(player, 1.62F);
                         put(player, LivingEntity.class, "activeEffects", new HashMap<>());
-                        put(player, Entity.class, "dimensions", EntityTypes.PLAYER.getDimensions());
+                        put(player, Entity.class, "dimensions", EntityType.PLAYER.getDimensions());
                         player.lvl = level;
                         if (p.length > 2) {
                             // An omen: trial_omen or bad_omen, with its amplifier.

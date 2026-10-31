@@ -205,7 +205,7 @@ public final class VanillaDispenserOracle {
         VanillaBlockUpdateOracle.set(Entity.class, player, "position", at);
         VanillaBlockUpdateOracle.set(Entity.class, player, "blockPosition", BlockPos.containing(at));
         // PiglinAi.angerNearbyPiglins looks around the player's box (gold, chests, barrels...).
-        player.setBoundingBox(EntityTypes.PLAYER.getDimensions().makeBoundingBox(at));
+        player.setBoundingBox(EntityType.PLAYER.getDimensions().makeBoundingBox(at));
         var gameMode = new net.minecraft.server.level.ServerPlayerGameMode(player);
         VanillaBlockUpdateOracle.set(net.minecraft.server.level.ServerPlayerGameMode.class, gameMode, "gameModeForPlayer",
             net.minecraft.world.level.GameType.SURVIVAL);
@@ -227,8 +227,8 @@ public final class VanillaDispenserOracle {
         @Override public boolean hasInfiniteMaterials() { return false; }
         @Override public boolean isCreative() { return false; }
         @Override public boolean isSpectator() { return false; }
-        @Override public EntityType<?> getType() { return EntityTypes.PLAYER; }
-        @Override public net.minecraft.core.Holder<EntityType<?>> typeHolder() { return EntityTypes.PLAYER.builtInRegistryHolder(); }
+        @Override public EntityType<?> getType() { return EntityType.PLAYER; }
+        @Override public net.minecraft.core.Holder<EntityType<?>> typeHolder() { return EntityType.PLAYER.builtInRegistryHolder(); }
         @Override public ItemStack getItemBySlot(EquipmentSlot slot) {
             return slot == EquipmentSlot.MAINHAND ? hand : slot == EquipmentSlot.OFFHAND ? offhand : ItemStack.EMPTY;
         }
@@ -499,8 +499,8 @@ public final class VanillaDispenserOracle {
         @Override public boolean hasInfiniteMaterials() { return creative; }
         @Override public boolean isCreative() { return creative; }
         @Override public boolean isSpectator() { return false; }
-        @Override public EntityType<?> getType() { return EntityTypes.PLAYER; }
-        @Override public net.minecraft.core.Holder<EntityType<?>> typeHolder() { return EntityTypes.PLAYER.builtInRegistryHolder(); }
+        @Override public EntityType<?> getType() { return EntityType.PLAYER; }
+        @Override public net.minecraft.core.Holder<EntityType<?>> typeHolder() { return EntityType.PLAYER.builtInRegistryHolder(); }
         @Override public ItemStack getItemInHand(net.minecraft.world.InteractionHand h) {
             return h == net.minecraft.world.InteractionHand.MAIN_HAND ? hand : ItemStack.EMPTY;
         }
@@ -557,8 +557,8 @@ public final class VanillaDispenserOracle {
         @Override public boolean isSecondaryUseActive() { return sneaking; }
         @Override public boolean isShiftKeyDown() { return sneaking; }
         @Override public boolean isDescending() { return sneaking; }
-        @Override public EntityType<?> getType() { return EntityTypes.PLAYER; }
-        @Override public net.minecraft.core.Holder<EntityType<?>> typeHolder() { return EntityTypes.PLAYER.builtInRegistryHolder(); }
+        @Override public EntityType<?> getType() { return EntityType.PLAYER; }
+        @Override public net.minecraft.core.Holder<EntityType<?>> typeHolder() { return EntityType.PLAYER.builtInRegistryHolder(); }
         @Override public ItemStack getItemBySlot(EquipmentSlot slot) {
             return slot == EquipmentSlot.MAINHAND ? hand : slot == EquipmentSlot.OFFHAND ? offhand : ItemStack.EMPTY;
         }
@@ -695,8 +695,8 @@ public final class VanillaDispenserOracle {
         @Override public boolean isSpectator() { return false; }
         @Override public boolean isFallFlying() { return fallFlying; }
         @Override public net.minecraft.world.phys.Vec3 getKnownMovement() { return getDeltaMovement(); }
-        @Override public EntityType<?> getType() { return EntityTypes.PLAYER; }
-        @Override public net.minecraft.core.Holder<EntityType<?>> typeHolder() { return EntityTypes.PLAYER.builtInRegistryHolder(); }
+        @Override public EntityType<?> getType() { return EntityType.PLAYER; }
+        @Override public net.minecraft.core.Holder<EntityType<?>> typeHolder() { return EntityType.PLAYER.builtInRegistryHolder(); }
         @Override public ItemStack getItemBySlot(EquipmentSlot slot) { return slot == EquipmentSlot.MAINHAND ? hand : ItemStack.EMPTY; }
         @Override public ItemStack getItemInHand(net.minecraft.world.InteractionHand h) {
             return h == net.minecraft.world.InteractionHand.MAIN_HAND ? hand : ItemStack.EMPTY;
@@ -773,7 +773,7 @@ public final class VanillaDispenserOracle {
         var at = new net.minecraft.world.phys.Vec3(p.get(0).getAsDouble(), p.get(1).getAsDouble(), p.get(2).getAsDouble());
         VanillaBlockUpdateOracle.set(Entity.class, player, "position", at);
         VanillaBlockUpdateOracle.set(Entity.class, player, "blockPosition", BlockPos.containing(at));
-        var standing = EntityTypes.PLAYER.getDimensions();
+        var standing = EntityType.PLAYER.getDimensions();
         VanillaBlockUpdateOracle.set(Entity.class, player, "dimensions", standing);
         VanillaBlockUpdateOracle.set(Entity.class, player, "eyeHeight", standing.eyeHeight());
         player.setBoundingBox(standing.makeBoundingBox(at));

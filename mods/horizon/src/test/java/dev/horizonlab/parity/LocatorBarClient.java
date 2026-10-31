@@ -416,7 +416,7 @@ public final class LocatorBarClient {
                     }
                     if (state) recordState(p);
                     if (p instanceof net.minecraft.network.protocol.game.ClientboundAddEntityPacket a
-                        && a.getType() == net.minecraft.world.entity.EntityTypes.PLAYER) {
+                        && a.getType() == net.minecraft.world.entity.EntityType.PLAYER) {
                         String who = NAMES.getOrDefault(a.getUUID(), "uuid?");
                         seen.put(a.getId(), who);
                         if (players) record("add " + who + " at " + a.getX() + "," + a.getY() + "," + a.getZ());

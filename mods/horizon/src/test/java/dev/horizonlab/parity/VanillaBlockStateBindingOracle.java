@@ -4,8 +4,8 @@ import com.google.gson.*;
 import com.mojang.serialization.JsonOps;
 import java.nio.file.*;
 import java.util.*;
-import net.minecraft.client.renderer.block.dispatch.*;
-import net.minecraft.client.renderer.block.dispatch.multipart.MultiPartModel;
+import net.minecraft.client.renderer.block.model.*;
+import net.minecraft.client.renderer.block.model.multipart.MultiPartModel;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.client.resources.model.BlockStateDefinitions;
@@ -55,7 +55,7 @@ public final class VanillaBlockStateBindingOracle {
     private static <T extends Comparable<T>> String value(BlockState state,Property<T> property) {return property.getName(state.getValue(property));}
     private static Object bind(JsonObject row) throws Exception {
         var states=Objects.requireNonNull(mapper.apply(Identifier.parse(row.get("block").getAsString())));
-        var definition=BlockStateModelDispatcher.CODEC.parse(JsonOps.INSTANCE,StrictJsonParser.parse(row.get("json").getAsString())).getOrThrow();
+        var definition=BlockModelDefinition.CODEC.parse(JsonOps.INSTANCE,StrictJsonParser.parse(row.get("json").getAsString())).getOrThrow();
         var roots=definition.instantiate(states,()->"horizon:binding_probe");
         var indices=new IdentityHashMap<BlockStateModel.Unbaked,Integer>();
         definition.simpleModels().ifPresent(m->{int index=0;for(var value:m.models().values())indices.put(value,index++);});
@@ -76,7 +76,10 @@ public final class VanillaBlockStateBindingOracle {
         return selected;
     }
     public static void main(String[] args) throws Exception {
-        net.minecraft.SharedConstants.tryDetectVersion();net.minecraft.server.Bootstrap.bootStrap();mapper=BlockStateDefinitions.definitionLocationToBlockStateMapper();
+        net.minecraft.SharedConstants.tryDetectVersion();net.minecraft.server.Bootstrap.bootStrap();
+        // package-private in 1.21.11
+        var mapperMethod=BlockStateDefinitions.class.getDeclaredMethod("definitionLocationToBlockStateMapper");mapperMethod.setAccessible(true);
+        @SuppressWarnings("unchecked") var found=(java.util.function.Function<Identifier,StateDefinition<Block,BlockState>>)mapperMethod.invoke(null);mapper=found;
         if(args[0].equals("export")){export(Path.of(args[1]));return;}
         try(var input=Files.newBufferedReader(Path.of(args[0]));var output=Files.newBufferedWriter(Path.of(args[1]))) {
             for(String line;(line=input.readLine())!=null;) {

@@ -34,7 +34,7 @@ public final class VanillaSprintInputOracle {
         @Override public boolean isSpectator(){return false;}
     }
     static final class Vehicle extends net.minecraft.world.entity.decoration.ArmorStand {
-        Actor actor;Vehicle(){super(EntityTypes.ARMOR_STAND,null);}
+        Actor actor;Vehicle(){super(EntityType.ARMOR_STAND,null);}
         @Override public boolean canSprint(){return actor.flag(2);}
         void configure(net.minecraft.world.level.Level level){setLevel(level);}
         @Override protected boolean isLocalClientAuthoritative(){return actor.flag(3);}

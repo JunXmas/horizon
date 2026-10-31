@@ -308,6 +308,8 @@ struct Run<'a> {
     client_classpath: String,
     bundles: std::cell::OnceCell<PathBuf>,
     workers: std::cell::RefCell<[Option<worker::Worker>; 2]>,
+    /// 1.21.11 and older (artifacts::obfuscated): the remapped jars, and the older data layout.
+    legacy: bool,
     previous: Value,
     origin: Value,
     log: Log<'a>,
@@ -496,6 +498,7 @@ fn prepare_impl(options: &Options, log: Log, compile_only: bool) -> Result<PathB
         client_classpath: classpath_join(&found.jars["client"], &client_libraries),
         bundles: std::cell::OnceCell::new(),
         workers: std::cell::RefCell::new([None, None]),
+        legacy: artifacts::obfuscated(&found.manifest),
         previous,
         origin,
         log,
@@ -1017,7 +1020,17 @@ fn install_datagen_reports(root: &Path, reports: &Path) -> Result<(), String> {
         copy(&reports.join(name), &root.join(name))?;
     }
     let mut components = Value::Object(Vec::new());
-    for file in json_files(&reports.join("minecraft/components/item"))? {
+    // 1.21.11 and older report every item's components in one items.json.
+    let legacy = reports.join("items.json");
+    if legacy.is_file() {
+        for (name, report) in read_json(&legacy)?.as_object().ok_or("items.json is not an object")? {
+            let component = report
+                .get("components")
+                .ok_or_else(|| format!("{name} has no components"))?;
+            components.insert(name, component.clone());
+        }
+    }
+    for file in json_files(&reports.join("minecraft/components/item")).unwrap_or_default() {
         let stem = file.file_stem().unwrap().to_string_lossy().into_owned();
         let report = read_json(&file)?;
         let component = report
@@ -1102,9 +1115,22 @@ fn prepare_worldgen(run: &Run) -> Result<(), String> {
     }
     let mut client = open_zip(&run.client)?;
     for (name, path) in WORLDGEN_BUNDLES {
+        // 1.21.11 and older: features and carvers are `configured_*`, and rules, conditions, block state
+        // providers and feature tags have no registry of their own, so those bundles are empty.
+        let legacy = run.legacy;
+        let path = match path {
+            "worldgen/feature" if legacy => "worldgen/configured_feature",
+            "worldgen/carver" if legacy => "worldgen/configured_carver",
+            _ => path,
+        };
+        let inline_only = legacy
+            && matches!(
+                path,
+                "worldgen/material_rule" | "worldgen/material_condition" | "worldgen/block_state_provider" | "tags/worldgen/feature"
+            );
         let prefix = format!("data/minecraft/{path}/");
         let resources = json_resources(&mut server, &prefix)?;
-        if resources.as_object().is_none_or(<[_]>::is_empty)
+        if (resources.as_object().is_none_or(<[_]>::is_empty) && !inline_only)
             || resources != json_resources(&mut client, &prefix)?
         {
             return Err(format!("Reference worldgen resources disagree: {path}"));

@@ -653,15 +653,6 @@ pub fn import(
         "sha1",
         &files.hint(&lock.version),
     )?;
-    let downloads = manifest.get("downloads");
-    if downloads.and_then(|d| d.get("client_mappings")).is_some()
-        || downloads.and_then(|d| d.get("server_mappings")).is_some()
-    {
-        return Err(
-            "This workflow targets unobfuscated releases. Older releases need a remapping stage."
-                .into(),
-        );
-    }
     let id = manifest
         .get("id")
         .and_then(Value::as_str)
@@ -919,11 +910,34 @@ pub fn verify(lock: &Lock) -> Result<Artifacts, String> {
         }
         libraries.push(library);
     }
+    if obfuscated(&manifest) {
+        // ponytail: the remapped jars come from tools/lab.py prepare (tools/remap.py), which downloads
+        // Mojang's mappings; horizon-prepare never downloads. A launcher doing the same is the upgrade.
+        for side in ["client", "server"] {
+            let named = lock.directory.join(format!("jars/{side}-named.jar"));
+            if !named.exists() {
+                return Err(format!(
+                    "{} is obfuscated: run tools/lab.py prepare once to remap it ({} is missing)",
+                    lock.version,
+                    named.display()
+                ));
+            }
+            jars.insert(side, named);
+        }
+    }
     Ok(Artifacts {
         manifest,
         jars,
         libraries,
     })
+}
+
+/// 1.21.11 and older ship obfuscated, with Mojang's mappings beside the jars.
+pub(crate) fn obfuscated(manifest: &Value) -> bool {
+    manifest
+        .get("downloads")
+        .and_then(|d| d.get("client_mappings"))
+        .is_some()
 }
 
 /// The client libraries, checked against the version JSON (tools/test_model_baking_parity.py's

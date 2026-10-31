@@ -300,12 +300,12 @@ public final class VanillaEntityDeathLootOracle {
         DamageSource source = switch (c.getOrDefault("source", "attack")) {
             case "attack" -> killer == null ? sources.generic() : killer instanceof Player p ? sources.playerAttack(p) : sources.mobAttack(killer);
             case "arrow" -> {
-                var arrow = new net.minecraft.world.entity.projectile.arrow.Arrow(EntityTypes.ARROW, level);
+                var arrow = new net.minecraft.world.entity.projectile.arrow.Arrow(EntityType.ARROW, level);
                 arrow.setPos(1.5, 64.0, 0.5);
                 yield sources.arrow(arrow, killer);
             }
             case "fireball" -> {
-                var fireball = new net.minecraft.world.entity.projectile.hurtingprojectile.LargeFireball(EntityTypes.FIREBALL, level);
+                var fireball = new net.minecraft.world.entity.projectile.hurtingprojectile.LargeFireball(EntityType.FIREBALL, level);
                 fireball.setPos(1.5, 64.0, 0.5);
                 yield sources.fireball(fireball, killer);
             }

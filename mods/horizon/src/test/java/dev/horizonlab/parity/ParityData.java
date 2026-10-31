@@ -42,15 +42,16 @@ public final class ParityData {
         var resources = new MultiPackResourceManager(PackType.SERVER_DATA, repo.openAllSelected());
         var layers = RegistryLayer.createRegistryAccess();
         var staticTags = TagLoader.loadTagsForExistingRegistries(resources, layers.getLayer(RegistryLayer.STATIC));
-        var context = TagLoader.buildUpdatedLookups(layers.getAccessForLoading(RegistryLayer.WORLD), staticTags);
-        RegistryAccess.Frozen world = RegistryDataLoader.load(resources, context, RegistryDataLoader.WORLD_REGISTRIES, Runnable::run).join();
-        var worldLayers = layers.replaceFrom(RegistryLayer.WORLD, world);
+        // WorldLoader.load of 1.21.11: worldgen registries, then dimensions over them.
+        var context = TagLoader.buildUpdatedLookups(layers.getAccessForLoading(RegistryLayer.WORLDGEN), staticTags);
+        RegistryAccess.Frozen worldgen = RegistryDataLoader.load(resources, context, RegistryDataLoader.WORLDGEN_REGISTRIES);
+        var withWorldgen = java.util.stream.Stream.concat(context.stream(), worldgen.listRegistries()).toList();
+        RegistryAccess.Frozen dimensions = RegistryDataLoader.load(resources, withWorldgen, RegistryDataLoader.DIMENSION_REGISTRIES);
+        var worldLayers = layers.replaceFrom(RegistryLayer.WORLDGEN, worldgen, dimensions);
         var loaded = ReloadableServerRegistries.reload(worldLayers, staticTags, resources, Runnable::run).join();
         loot = new ReloadableServerRegistries.Holder(loaded.lookupWithUpdatedTags());
         lookup = loaded.lookupWithUpdatedTags();
-        var components = BuiltInRegistries.DATA_COMPONENT_INITIALIZERS.build(lookup);
         staticTags.forEach(Registry.PendingTags::apply);
-        components.forEach(net.minecraft.core.component.DataComponentInitializers.PendingComponents::apply);
         access = loaded.layers().compositeAccess();
         ops = RegistryOps.create(NbtOps.INSTANCE, lookup);
         var unsafeField = Class.forName("sun.misc.Unsafe").getDeclaredField("theUnsafe");

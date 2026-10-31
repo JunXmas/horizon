@@ -368,13 +368,13 @@ public final class VanillaSceneMotionOracle {
                 var row=JsonParser.parseString(line).getAsJsonObject();var p=(Actor)allocate.invoke(unsafe,Actor.class);p.configure(level);p.events=new ArrayList<>();level.actor=p;p.effectFlags=new HashSet<>();p.air=300;
                 // Entity.nextStep's initializer (allocation skips it): the first footstep or swim sound after a metre.
                 field(Entity.class,"nextStep").setFloat(p,1.0F);
-                write(field(Entity.class,"type"),p,EntityTypes.PLAYER);
+                write(field(Entity.class,"type"),p,EntityType.PLAYER);
                 p.scenePose=Pose.STANDING;
                 write(field(Entity.class,"passengers"),p,com.google.common.collect.ImmutableList.of());write(field(Entity.class,"dimensions"),p,p.getDefaultDimensions(Pose.STANDING));write(field(Entity.class,"eyeHeight"),p,1.62f);
                 write(field(Entity.class,"interpolationHandler"),p,InterpolationHandler.NO_OP);
                 var equipment=new EntityEquipment();write(field(LivingEntity.class,"equipment"),p,equipment);
                 write(field(Player.class,"inventory"),p,new Inventory(p,equipment));
-                p.attrs=new TrackedAttributes(VanillaEntityAttributeOracle.supplier(EntityTypes.PLAYER));write(field(LivingEntity.class,"attributes"),p,p.attrs);
+                p.attrs=new TrackedAttributes(VanillaEntityAttributeOracle.supplier(EntityType.PLAYER));write(field(LivingEntity.class,"attributes"),p,p.attrs);
                 write(field(Entity.class,"finalMovementsThisTick"),p,new ArrayList<>());write(field(Entity.class,"visitedBlocks"),p,new it.unimi.dsi.fastutil.longs.LongOpenHashSet());
                 write(field(Entity.class,"insideEffectCollector"),p,new net.minecraft.world.entity.InsideBlockEffectApplier.StepBasedCollector());
                 write(field(Entity.class,"fluidInteraction"),p,new net.minecraft.world.entity.EntityFluidInteraction(Set.of(net.minecraft.tags.FluidTags.WATER,net.minecraft.tags.FluidTags.LAVA)));

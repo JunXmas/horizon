@@ -62,7 +62,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntitySpawnRequest;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.monster.creaking.Creaking;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
@@ -541,7 +541,7 @@ public final class VanillaMobAiOracle {
                 if (s.boat != null) {
                     // A boat that does not tick (its physics are not under test): moved by the script, the
                     // player rides it and has the speed it moves at (Entity.computeSpeed, as Entity.tick).
-                    boat = new net.minecraft.world.entity.vehicle.boat.Boat(EntityTypes.OAK_BOAT, level, () -> net.minecraft.world.item.Items.OAK_BOAT) {
+                    boat = new net.minecraft.world.entity.vehicle.boat.Boat(EntityType.OAK_BOAT, level, () -> net.minecraft.world.item.Items.OAK_BOAT) {
                         @Override public void tick() {}
                     };
                     boat.snapTo(s.player[0], s.player[1], s.player[2], 0.0F, 0.0F);
@@ -707,8 +707,8 @@ public final class VanillaMobAiOracle {
             // n-th with seed 1000 + n; they join the list once in the level.
             List<Mob> created = new ArrayList<>();
             Field factoryField = field(EntityType.class, "factory");
-            Object creakingFactory = factoryField.get(EntityTypes.CREAKING);
-            factoryField.set(EntityTypes.CREAKING, (EntityType.EntityFactory<Creaking>) (type, lvl) -> {
+            Object creakingFactory = factoryField.get(EntityType.CREAKING);
+            factoryField.set(EntityType.CREAKING, (EntityType.EntityFactory<Creaking>) (type, lvl) -> {
                 Creaking c = new Creaking(type, lvl);
                 try {
                     long seed = 1000 + created.size();
@@ -881,7 +881,7 @@ public final class VanillaMobAiOracle {
                 boat.discard();
             }
             for (BlockPos h : heartPositions) level.setBlock(h, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), 2 | 16);
-            factoryField.set(EntityTypes.CREAKING, creakingFactory);
+            factoryField.set(EntityType.CREAKING, creakingFactory);
             this.getGameRules().set(GameRules.SPAWN_MOBS, spawnMobs, this);
             this.getGameRules().set(GameRules.SPAWN_MONSTERS, spawnMonsters, this);
             managerTick.invoke(manager);

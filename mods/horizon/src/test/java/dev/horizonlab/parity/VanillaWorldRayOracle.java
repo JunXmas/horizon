@@ -61,7 +61,7 @@ public final class VanillaWorldRayOracle {
     }
     static final class Actor extends Marker {
         Data d;Actor(){super(null,null);}
-        @Override public boolean is(EntityType<?> type){if(type!=EntityTypes.PLAYER)throw new AssertionError();d.query("player");return d.f.get("player").getAsBoolean();}
+        @Override public boolean is(EntityType<?> type){if(type!=EntityType.PLAYER)throw new AssertionError();d.query("player");return d.f.get("player").getAsBoolean();}
         @Override public boolean isDescending(){return false;}
     }
     public static void main(String[] args)throws Exception {

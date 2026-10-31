@@ -135,7 +135,7 @@ public final class VanillaRemoteAttackOracle {
              var lines = Files.lines(Path.of(args[0]))) {
             for (var line : (Iterable<String>) lines::iterator) {
                 var c = JsonParser.parseString(line).getAsJsonObject();
-                Attacker player = entity(Attacker.class, EntityTypes.PLAYER, level);
+                Attacker player = entity(Attacker.class, EntityType.PLAYER, level);
                 field(Player.class, "abilities").set(player, new Abilities());
                 field(LivingEntity.class, "activeEffects").set(player, new HashMap<>());
                 player.map = new AttributeMap(Player.createAttributes().build());
@@ -157,8 +157,8 @@ public final class VanillaRemoteAttackOracle {
                 player.setDeltaMovement(new Vec3(d(v.get(0)), d(v.get(1)), d(v.get(2))));
                 float strength = player.getAttackStrengthScale(0.5F);
                 Entity target = c.get("target").getAsString().equals("player")
-                    ? entity(PlayerTarget.class, EntityTypes.PLAYER, level)
-                    : entity(MobTarget.class, EntityTypes.ZOMBIE, level);
+                    ? entity(PlayerTarget.class, EntityType.PLAYER, level)
+                    : entity(MobTarget.class, EntityType.ZOMBIE, level);
                 player.attack(target);
                 Vec3 after = player.getDeltaMovement();
                 out.printf("%08x %016x %016x %016x %s%n", Float.floatToRawIntBits(strength), Double.doubleToRawLongBits(after.x),

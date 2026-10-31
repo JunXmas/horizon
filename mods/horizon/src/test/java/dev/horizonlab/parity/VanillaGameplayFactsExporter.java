@@ -34,7 +34,7 @@ public final class VanillaGameplayFactsExporter {
             var block = state.getBlock();
             o.addProperty("id", Block.getId(state));
             o.addProperty("emission", state.getLightEmission());
-            o.addProperty("dampening", state.getLightDampening());
+            o.addProperty("dampening", state.getLightBlock());
             o.addProperty("skylight_down", state.propagatesSkylightDown());
             o.addProperty("shape_occlusion", state.useShapeForLightOcclusion());
             o.addProperty("can_occlude", state.canOcclude());

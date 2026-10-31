@@ -125,8 +125,8 @@ public final class VanillaMenuOracle {
         @Override public boolean hasInfiniteMaterials() { return creative; }
         @Override public boolean isCreative() { return creative; }
         @Override public boolean isSpectator() { return false; }
-        @Override public EntityType<?> getType() { return net.minecraft.world.entity.EntityTypes.PLAYER; }
-        @Override public net.minecraft.core.Holder<EntityType<?>> typeHolder() { return net.minecraft.world.entity.EntityTypes.PLAYER.builtInRegistryHolder(); }
+        @Override public EntityType<?> getType() { return net.minecraft.world.entity.EntityType.PLAYER; }
+        @Override public net.minecraft.core.Holder<EntityType<?>> typeHolder() { return net.minecraft.world.entity.EntityType.PLAYER.builtInRegistryHolder(); }
         @Override public boolean canUseSlot(EquipmentSlot slot) { return true; }
         @Override public void onEquipItem(EquipmentSlot slot, ItemStack old, ItemStack now) {
             if (!ItemStack.isSameItemSameComponents(old, now)) equips.add(slot.getName() + ":" + ParityData.canon(now));

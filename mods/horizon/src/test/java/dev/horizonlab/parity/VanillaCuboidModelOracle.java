@@ -4,8 +4,7 @@ import com.google.gson.*;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
-import net.minecraft.client.resources.model.cuboid.*;
-import net.minecraft.client.resources.model.sprite.TextureSlots;
+import net.minecraft.client.renderer.block.model.*;
 import net.minecraft.world.item.ItemDisplayContext;
 import org.joml.Vector3fc;
 
@@ -25,29 +24,30 @@ public final class VanillaCuboidModelOracle {
         if (value == null) return null;
         return map("rotation", vector(value.rotation()), "translation", vector(value.translation()), "scale", vector(value.scale()));
     }
-    private static Object rotation(CuboidRotation value) {
+    private static Object rotation(BlockElementRotation value) {
         if (value == null) return null;
         Object angles = switch (value.value()) {
-            case CuboidRotation.SingleAxisRotation single -> map("axis", single.axis().getName(), "angle", bits(single.angle()));
-            case CuboidRotation.EulerXYZRotation euler -> new long[]{bits(euler.x()), bits(euler.y()), bits(euler.z())};
+            case BlockElementRotation.SingleAxisRotation single -> map("axis", single.axis().getName(), "angle", bits(single.angle()));
+            case BlockElementRotation.EulerXYZRotation euler -> new long[]{bits(euler.x()), bits(euler.y()), bits(euler.z())};
             default -> throw new AssertionError("Unexpected parsed rotation " + value.value().getClass());
         };
         return map("origin", vector(value.origin()), "value", angles, "rescale", value.rescale());
     }
-    private static Object face(CuboidFace value) {
+    private static Object face(BlockElementFace value) {
         if (value == null) return null;
         var uv = value.uvs();
         return map("cull", direction(value.cullForDirection()), "tint", value.tintIndex(), "texture", value.texture(),
             "rotation", value.rotation().ordinal(), "uv", uv == null ? null : new long[]{bits(uv.minU()), bits(uv.minV()), bits(uv.maxU()), bits(uv.maxV())});
     }
-    static Object element(CuboidModelElement value) {
+    // 1.21.11: `shade` is a boolean (26.1 made it an optional direction override).
+    static Object element(BlockElement value) {
         if (value == null) return null;
         var faces = new TreeMap<String, Object>();
         value.faces().forEach((key, f) -> faces.put(key.getName(), face(f)));
         return map("from", vector(value.from()), "to", vector(value.to()), "faces", faces,
-            "rotation", rotation(value.rotation()), "shade", direction(value.shadeDirectionOverride()), "light", value.lightEmission());
+            "rotation", rotation(value.rotation()), "shade", value.shade(), "light", value.lightEmission());
     }
-    private static Object model(CuboidModel value) throws Exception {
+    private static Object model(BlockModel value) throws Exception {
         if (value == null) return null;
         var textures = new TreeMap<String, Object>();
         // Slot implementation records are package-private; inspect only their public accessors.
@@ -59,14 +59,15 @@ public final class VanillaCuboidModelOracle {
                 textures.put(entry.getKey(), map("reference", target.invoke(slot)));
             } else {
                 var method = cls.getDeclaredMethod("material"); method.setAccessible(true);
-                var material = (net.minecraft.client.resources.model.sprite.Material)method.invoke(slot);
-                textures.put(entry.getKey(), map("sprite", material.sprite().toString(), "translucent", material.forceTranslucent()));
+                var material = (net.minecraft.client.resources.model.Material)method.invoke(slot);
+                // 1.21.11 materials have no forced translucency (26.1 added it).
+                textures.put(entry.getKey(), map("sprite", material.texture().toString(), "translucent", false));
             }
         }
         List<Object> elements = null;
         if (value.geometry() != null) {
             elements = new ArrayList<>();
-            for (var element : ((UnbakedCuboidGeometry)value.geometry()).elements()) elements.add(element(element));
+            for (var element : ((SimpleUnbakedGeometry)value.geometry()).elements()) elements.add(element(element));
         }
         Object display = null;
         if (value.transforms() != null) {
@@ -84,8 +85,8 @@ public final class VanillaCuboidModelOracle {
         try (var input=Files.newBufferedReader(Path.of(args[0])); var output=Files.newBufferedWriter(Path.of(args[1]))) {
             for (String line; (line=input.readLine())!=null;) {
                 var row=JsonParser.parseString(line).getAsJsonArray();
-                CuboidModel decoded;
-                try { decoded=CuboidModel.fromStream(new StringReader(row.get(1).getAsString())); }
+                BlockModel decoded;
+                try { decoded=BlockModel.fromStream(new StringReader(row.get(1).getAsString())); }
                 catch (RuntimeException failure) {
                     output.write(JSON.toJson(map("name", row.get(0).getAsString(), "error", true))); output.newLine(); continue;
                 }

@@ -80,7 +80,7 @@ public final class VanillaCommandParseOracle {
             this(server, null, perms, access, lookup);
         }
         Src(MinecraftServer server, net.minecraft.server.level.ServerLevel level, PermissionSet perms, RegistryAccess access, HolderLookup.Provider lookup) {
-            super(CommandSource.NULL, Vec3.ZERO, Vec2.ZERO, level, perms, Component.literal("Player"), server);
+            super(CommandSource.NULL, Vec3.ZERO, Vec2.ZERO, level, perms, "Player", Component.literal("Player"), server, null);
             this.access = access;
             this.lookup = lookup;
         }
@@ -90,11 +90,12 @@ public final class VanillaCommandParseOracle {
         @Override public RegistryAccess registryAccess() { return access; }
         @Override public Set<ResourceKey<Level>> levels() { return Set.of(Level.OVERWORLD, Level.NETHER, Level.END); }
         @Override public FeatureFlagSet enabledFeatures() { return FeatureFlags.VANILLA_SET; }
-        @Override public <E> java.util.concurrent.CompletableFuture<Suggestions> suggestRegistryElements(ResourceKey<? extends Registry<E>> key, SharedSuggestionProvider.ElementSuggestionType elements, com.mojang.brigadier.suggestion.SuggestionsBuilder builder, com.mojang.brigadier.context.CommandContext<?> context, java.util.function.Predicate<E> filter) {
-            java.util.Optional<? extends HolderLookup<E>> registry = access.lookup(key);
-            if (registry.isEmpty()) registry = lookup.lookup(key);
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        @Override public java.util.concurrent.CompletableFuture<Suggestions> suggestRegistryElements(ResourceKey<? extends Registry<?>> key, SharedSuggestionProvider.ElementSuggestionType elements, com.mojang.brigadier.suggestion.SuggestionsBuilder builder, com.mojang.brigadier.context.CommandContext<?> context) {
+            java.util.Optional<? extends HolderLookup<?>> registry = access.lookup((ResourceKey) key);
+            if (registry.isEmpty()) registry = lookup.lookup((ResourceKey) key);
             if (registry.isEmpty()) return Suggestions.empty();
-            this.suggestRegistryElements(registry.get(), elements, builder, filter);
+            this.suggestRegistryElements(registry.get(), elements, builder);
             return builder.buildFuture();
         }
     }
@@ -123,19 +124,17 @@ public final class VanillaCommandParseOracle {
         var resources = new MultiPackResourceManager(PackType.SERVER_DATA, repo.openAllSelected());
         var layers = RegistryLayer.createRegistryAccess();
         var staticTags = TagLoader.loadTagsForExistingRegistries(resources, layers.getLayer(RegistryLayer.STATIC));
-        var context = TagLoader.buildUpdatedLookups(layers.getAccessForLoading(RegistryLayer.WORLD), staticTags);
-        RegistryAccess.Frozen world = RegistryDataLoader.load(resources, context, RegistryDataLoader.WORLD_REGISTRIES, Runnable::run).join();
-        var dims = RegistryDataLoader.load(resources, java.util.stream.Stream.concat(context.stream(), world.listRegistries()).toList(), RegistryDataLoader.DIMENSION_REGISTRIES, Runnable::run).join();
-        var worldLayers = layers.replaceFrom(RegistryLayer.WORLD, world, dims);
+        var context = TagLoader.buildUpdatedLookups(layers.getAccessForLoading(RegistryLayer.WORLDGEN), staticTags);
+        RegistryAccess.Frozen world = RegistryDataLoader.load(resources, context, RegistryDataLoader.WORLDGEN_REGISTRIES);
+        var dims = RegistryDataLoader.load(resources, java.util.stream.Stream.concat(context.stream(), world.listRegistries()).toList(), RegistryDataLoader.DIMENSION_REGISTRIES);
+        var worldLayers = layers.replaceFrom(RegistryLayer.WORLDGEN, world, dims);
         var loaded = ReloadableServerRegistries.reload(worldLayers, staticTags, resources, Runnable::run).join();
         // The data pack managers (advancements, functions, recipes) a running server holds.
         var managers = net.minecraft.server.ReloadableServerResources.loadResources(
             resources, worldLayers, staticTags, FeatureFlags.VANILLA_SET, Commands.CommandSelection.INTEGRATED,
             LevelBasedPermissionSet.GAMEMASTER, Runnable::run, Runnable::run).join();
         HolderLookup.Provider lookup = loaded.lookupWithUpdatedTags();
-        var components = BuiltInRegistries.DATA_COMPONENT_INITIALIZERS.build(lookup);
         staticTags.forEach(Registry.PendingTags::apply);
-        components.forEach(net.minecraft.core.component.DataComponentInitializers.PendingComponents::apply);
         RegistryAccess access = loaded.layers().compositeAccess();
 
         if (args[0].equals("registries")) {
@@ -171,14 +170,12 @@ public final class VanillaCommandParseOracle {
         put(server, MinecraftServer.class, "stopwatches", stopwatchesCtor.newInstance());
         put(server, MinecraftServer.class, "customBossEvents", new net.minecraft.server.bossevents.CustomBossEvents());
         put(server, MinecraftServer.class, "randomSequences", new net.minecraft.world.RandomSequences());
-        put(server, MinecraftServer.class, "scheduledEvents", new net.minecraft.world.level.timers.TimerQueue<MinecraftServer>());
-        var clocks = net.minecraft.world.clock.ServerClockManager.TYPE.constructor().get();
-        clocks.init(server);
-        put(server, MinecraftServer.class, "clockManager", clocks);
-        var templates = (net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager) unsafe.allocateInstance(
-            net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager.class);
-        put(templates, net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager.class, "sources", List.of(templateSource(lookup, resources)));
-        put(server, MinecraftServer.class, "structureTemplateManager", templates);
+        // 1.21.11: /schedule reads the overworld's level data, and there are no world clocks.
+        var worldData = (net.minecraft.world.level.storage.PrimaryLevelData) unsafe.allocateInstance(net.minecraft.world.level.storage.PrimaryLevelData.class);
+        put(worldData, net.minecraft.world.level.storage.PrimaryLevelData.class, "scheduledEvents",
+            new net.minecraft.world.level.timers.TimerQueue<MinecraftServer>(net.minecraft.world.level.timers.TimerCallbacks.SERVER_CALLBACKS));
+        put(server, MinecraftServer.class, "worldData", worldData);
+        put(server, MinecraftServer.class, "structureTemplateManager", templateManager(resources));
         var level = (net.minecraft.server.level.ServerLevel) unsafe.allocateInstance(net.minecraft.server.level.ServerLevel.class);
         put(level, Level.class, "dimensionTypeRegistration",
             access.lookupOrThrow(Registries.DIMENSION_TYPE).getOrThrow(net.minecraft.world.level.dimension.BuiltinDimensionTypes.OVERWORLD));
@@ -267,10 +264,19 @@ public final class VanillaCommandParseOracle {
         sb.close();
     }
 
-    static net.minecraft.world.level.levelgen.structure.templatesystem.loader.ResourceManagerTemplateSource templateSource(HolderLookup.Provider lookup, MultiPackResourceManager resources) {
-        return new net.minecraft.world.level.levelgen.structure.templatesystem.loader.ResourceManagerTemplateSource(
-            net.minecraft.util.datafix.DataFixers.getDataFixer(), lookup.lookupOrThrow(Registries.BLOCK), resources,
-            new net.minecraft.resources.FileToIdConverter("structure", ".nbt"));
+    /** 1.21.11's StructureTemplateManager with only its data pack source (no generated or test structures). */
+    static net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager templateManager(MultiPackResourceManager resources) throws Exception {
+        var type = net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager.class;
+        var templates = (net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager) unsafe.allocateInstance(type);
+        put(templates, type, "resourceManager", resources);
+        var lister = new net.minecraft.resources.FileToIdConverter("structure", ".nbt");
+        var source = Class.forName(type.getName() + "$Source").getDeclaredConstructors()[0];
+        source.setAccessible(true);
+        java.util.function.Function<net.minecraft.resources.Identifier, java.util.Optional<?>> load = id -> java.util.Optional.empty();
+        java.util.function.Supplier<java.util.stream.Stream<net.minecraft.resources.Identifier>> list =
+            () -> lister.listMatchingResources(resources).keySet().stream().map(lister::fileToId);
+        put(templates, type, "sources", List.of(source.newInstance(load, list)));
+        return templates;
     }
 
     static void exportRegistries(Path out, RegistryAccess access, HolderLookup.Provider lookup, net.minecraft.server.packs.repository.PackRepository repo, MultiPackResourceManager resources, net.minecraft.server.ReloadableServerResources managers) throws Exception {
@@ -318,18 +324,10 @@ public final class VanillaCommandParseOracle {
         repo.getAvailablePacks().stream().filter(p -> p.getRequestedFeatures().isSubsetOf(FeatureFlags.VANILLA_SET))
             .forEach(p -> enableable.add(p.getId()));
         o.add("datapacks_enableable", enableable);
-        // ServerClockManager.commandTimeMarkersForClock, from the timelines' markers.
-        java.util.Map<String, Set<String>> markers = new java.util.TreeMap<>();
-        access.lookupOrThrow(Registries.WORLD_CLOCK).listElementIds().forEach(k -> markers.put(k.identifier().toString(), new TreeSet<>()));
-        access.lookupOrThrow(Registries.TIMELINE).listElements().forEach(t -> t.value().registerTimeMarkers((key, marker) -> {
-            if (marker.showInCommands())
-                markers.computeIfAbsent(marker.clock().unwrapKey().orElseThrow().identifier().toString(), x -> new TreeSet<>()).add(key.identifier().toString());
-        }));
-        JsonObject markerObj = new JsonObject();
-        markers.forEach((clock, ids) -> { JsonArray a = new JsonArray(); ids.forEach(a::add); markerObj.add(clock, a); });
-        o.add("clock_time_markers", markerObj);
+        // 1.21.11 has no world clocks or time markers (26.1 added them).
+        o.add("clock_time_markers", new JsonObject());
         Set<String> templates = new TreeSet<>();
-        templateSource(lookup, resources).list().forEach(id -> templates.add(id.toString()));
+        templateManager(resources).listTemplates().forEach(id -> templates.add(id.toString()));
         JsonArray templateArr = new JsonArray();
         templates.forEach(templateArr::add);
         o.add("templates", templateArr);
@@ -373,7 +371,7 @@ public final class VanillaCommandParseOracle {
         o.add("structures", dynamic(access, Registries.STRUCTURE));
         o.add("biomes", dynamic(access, Registries.BIOME));
         o.add("damage_types", dynamic(access, Registries.DAMAGE_TYPE));
-        o.add("clocks", dynamic(access, Registries.WORLD_CLOCK));
+        o.add("clocks", new JsonArray());
         o.add("timelines", dynamic(access, Registries.TIMELINE));
         o.add("dimensions", arr("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"));
         o.add("players", arr(PLAYERS));

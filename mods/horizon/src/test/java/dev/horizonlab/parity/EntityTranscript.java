@@ -20,7 +20,7 @@ import net.minecraft.network.protocol.game.ClientboundSetPassengersPacket;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket;
 import net.minecraft.network.protocol.game.VecDeltaCodec;
-import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -88,7 +88,7 @@ final class EntityTranscript {
     /** Applies one packet; false when it isn't about a tracked entity. */
     boolean accept(Packet<?> packet) {
         if (packet instanceof ClientboundAddEntityPacket p) {
-            if (p.getType() == EntityTypes.PLAYER) return true;
+            if (p.getType() == EntityType.PLAYER) return true;
             Tracked t = new Tracked(p);
             byId.put(p.getId(), t);
             all.add(t);

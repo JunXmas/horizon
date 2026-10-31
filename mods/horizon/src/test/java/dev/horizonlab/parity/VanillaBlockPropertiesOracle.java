@@ -26,7 +26,7 @@ public final class VanillaBlockPropertiesOracle {
         if(args[0].equals("export")) {
             VanillaCollisionOracle.main(new String[]{"generate",args[1]});
             var states=new ListTag();var blocks=new CompoundTag();
-            for(var state:Block.BLOCK_STATE_REGISTRY)states.add(BlockState.FULL_CODEC.encodeStart(NbtOps.INSTANCE,state).getOrThrow());
+            for(var state:Block.BLOCK_STATE_REGISTRY)states.add(BlockState.CODEC.encodeStart(NbtOps.INSTANCE,state).getOrThrow());
             for(var block:BuiltInRegistries.BLOCK) {
                 var p=properties.get(block);blocks.putByte(BuiltInRegistries.BLOCK.getKey(block).toString(),(byte)((on.getBoolean(p)?1:0)|(off.getBoolean(p)?2:0)|(replace.getBoolean(p)?4:0)|(liquid.getBoolean(p)?8:0)|(occlude.getBoolean(p)?16:0)));
             }

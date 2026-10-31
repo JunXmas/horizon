@@ -488,7 +488,7 @@ public final class VanillaFinalizeSpawnOracle {
                     // Chickens already standing by (zombie jockeys look for one).
                     int chickens = Integer.parseInt(c.getOrDefault("chickens", "0"));
                     for (int i = 0; i < chickens; i++) {
-                        Entity chicken = EntityTypes.CHICKEN.create(level, EntitySpawnReason.LOAD);
+                        Entity chicken = EntityType.CHICKEN.create(level, EntitySpawnReason.LOAD);
                         chicken.setPos(x + i, y, z);
                         level.entities.add(chicken);
                     }

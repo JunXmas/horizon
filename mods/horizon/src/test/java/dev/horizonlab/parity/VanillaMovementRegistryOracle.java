@@ -18,11 +18,15 @@ public final class VanillaMovementRegistryOracle {
     static final String[] PROPERTIES={"friction","speedFactor","jumpFactor","bounceRestitution","fallDistanceReduction"};
     static double number(JsonElement v){return Double.longBitsToDouble(Long.parseUnsignedLong(v.getAsString(),16));}
     static BlockPos position(JsonElement v){var a=v.getAsJsonArray();return new BlockPos(a.get(0).getAsInt(),a.get(1).getAsInt(),a.get(2).getAsInt());}
+    // 1.21.11 has no bounceRestitution / fallDistanceReduction properties: SlimeBlock and BedBlock bounce in
+    // updateEntityMovementAfterFallOn (slime 1.0, bed 0.66) and BedBlock.fallOn halves the distance.
+    static float bounce(Block b){return b instanceof SlimeBlock?1.0F:b instanceof BedBlock?0.66F:0.0F;}
+    static float reduction(Block b){return b instanceof BedBlock?0.5F:0.0F;}
     static void export(Path dir)throws Exception {
-        var fields=new Field[PROPERTIES.length];for(int i=0;i<fields.length;i++){fields[i]=BlockBehaviour.class.getDeclaredField(PROPERTIES[i]);fields[i].setAccessible(true);}
+        var fields=new Field[3];for(int i=0;i<fields.length;i++){fields[i]=BlockBehaviour.class.getDeclaredField(PROPERTIES[i]);fields[i].setAccessible(true);}
         var states=new ListTag();var defaults=new CompoundTag();var definitions=new CompoundTag();
-        for(var state:Block.BLOCK_STATE_REGISTRY){states.add(BlockState.FULL_CODEC.encodeStart(NbtOps.INSTANCE,state).getOrThrow());if(state==state.getBlock().defaultBlockState())defaults.putInt(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),Block.getId(state));}
-        for(var block:BuiltInRegistries.BLOCK){var data=new CompoundTag();for(int i=0;i<fields.length;i++)data.putFloat(PROPERTIES[i],fields[i].getFloat(block));data.putBoolean("fenceGate",block instanceof FenceGateBlock);definitions.put(BuiltInRegistries.BLOCK.getKey(block).toString(),data);}
+        for(var state:Block.BLOCK_STATE_REGISTRY){states.add(BlockState.CODEC.encodeStart(NbtOps.INSTANCE,state).getOrThrow());if(state==state.getBlock().defaultBlockState())defaults.putInt(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),Block.getId(state));}
+        for(var block:BuiltInRegistries.BLOCK){var data=new CompoundTag();for(int i=0;i<fields.length;i++)data.putFloat(PROPERTIES[i],fields[i].getFloat(block));data.putFloat(PROPERTIES[3],bounce(block));data.putFloat(PROPERTIES[4],reduction(block));data.putBoolean("fenceGate",block instanceof FenceGateBlock);definitions.put(BuiltInRegistries.BLOCK.getKey(block).toString(),data);}
         var info=new JsonObject();info.addProperty("states",states.size());var ids=new JsonObject();for(var block:BuiltInRegistries.BLOCK)ids.addProperty(BuiltInRegistries.BLOCK.getKey(block).toString(),Block.getId(block.defaultBlockState()));info.add("defaults",ids);Files.writeString(dir.resolve("registry-info.json"),info.toString());
         var registry=new CompoundTag();registry.putInt("DataVersion",net.minecraft.SharedConstants.getCurrentVersion().dataVersion().version());registry.put("states",states);registry.put("defaults",defaults);
         var movement=new CompoundTag();movement.putInt("DataVersion",net.minecraft.SharedConstants.getCurrentVersion().dataVersion().version());movement.put("states",states);movement.put("blocks",definitions);
@@ -30,7 +34,7 @@ public final class VanillaMovementRegistryOracle {
     }
     static final class Level extends net.minecraft.server.level.ServerLevel {
         JsonObject input;PrintWriter out;int calls;
-        private Level(){super(null,null,null,null,null,null,false,0L,List.of(),false);}
+        private Level(){super(null,null,null,null,null,null,false,0L,List.of(),false,null);}
         @Override public BlockState getBlockState(BlockPos p){out.println("state "+p.getX()+" "+p.getY()+" "+p.getZ());int call=calls++;if(call==input.get("fail").getAsInt())throw new Stop();var states=input.getAsJsonArray("states");return Block.stateById(states.get(call%states.size()).getAsInt());}
     }
     static final class Actor extends Marker {
@@ -43,12 +47,12 @@ public final class VanillaMovementRegistryOracle {
         VanillaHeightmapOracle.bindTags(JsonParser.parseString(Files.readString(dir.resolve("tags.json"))).getAsJsonObject());
         if(args[0].equals("export")){export(dir);return;}
         var registry=BuiltInRegistries.BLOCK;var natural=new HashMap<TagKey<Block>,List<Holder<Block>>>();var all=new ArrayList<Holder<Block>>();
-        var tags=List.of(BlockTags.FENCES,BlockTags.WALLS,BlockTags.SUPPRESSES_BOUNCE);
+        var tags=List.of(BlockTags.FENCES,BlockTags.WALLS);
         for(var tag:tags){var values=new ArrayList<Holder<Block>>();for(var block:registry){if(block.defaultBlockState().is(tag))values.add(block.builtInRegistryHolder());}natural.put(tag,values);}for(var block:registry)all.add(block.builtInRegistryHolder());
         var allocator=Class.forName("sun.misc.Unsafe");var field=allocator.getDeclaredField("theUnsafe");field.setAccessible(true);var unsafe=field.get(null);var allocate=allocator.getMethod("allocateInstance",Class.class);
         var support=Entity.class.getDeclaredField("mainSupportingBlockPos");support.setAccessible(true);var pos=Entity.class.getDeclaredField("position");pos.setAccessible(true);
         try(var out=new PrintWriter(Files.newBufferedWriter(dir.resolve(args[0]+".txt")));var lines=Files.lines(dir.resolve("inputs.txt"))){
-            for(var state:Block.BLOCK_STATE_REGISTRY){var b=state.getBlock();out.printf("properties %d %08x %08x %08x %08x %08x %s %s %s %s %s %s%n",Block.getId(state),Float.floatToIntBits(b.getFriction()),Float.floatToIntBits(b.getSpeedFactor()),Float.floatToIntBits(b.getJumpFactor()),Float.floatToIntBits(b.getBounceRestitution()),Float.floatToIntBits(b.getFallDistanceReduction()),b instanceof FenceGateBlock,state.is(BlockTags.FENCES),state.is(BlockTags.WALLS),state.is(BlockTags.SUPPRESSES_BOUNCE),state.is(Blocks.WATER),state.is(Blocks.BUBBLE_COLUMN));}
+            for(var state:Block.BLOCK_STATE_REGISTRY){var b=state.getBlock();out.printf("properties %d %08x %08x %08x %08x %08x %s %s %s %s %s %s%n",Block.getId(state),Float.floatToIntBits(b.getFriction()),Float.floatToIntBits(b.getSpeedFactor()),Float.floatToIntBits(b.getJumpFactor()),Float.floatToIntBits(bounce(b)),Float.floatToIntBits(reduction(b)),b instanceof FenceGateBlock,state.is(BlockTags.FENCES),state.is(BlockTags.WALLS),false,state.is(Blocks.WATER),state.is(Blocks.BUBBLE_COLUMN));}
             int active=-1;
             for(var line:(Iterable<String>)lines::iterator){
                 var f=JsonParser.parseString(line).getAsJsonObject();int tagMode=f.get("tags").getAsInt();if(active!=tagMode){var selected=new HashMap<TagKey<Block>,List<Holder<Block>>>();for(var tag:tags)selected.put(tag,tagMode==0?natural.get(tag):tagMode==1?List.of():all);registry.prepareTagReload(new TagLoader.LoadResult<>(Registries.BLOCK,selected)).apply();active=tagMode;}

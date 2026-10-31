@@ -609,13 +609,13 @@ public final class VanillaProtocolClient {
                     replies++;
                     record("play-chat", "disguised " + json(p.message()) + " " + p.chatType().chatType().getRegisteredName());
                 } else if (packet instanceof net.minecraft.network.protocol.game.ClientboundAddEntityPacket p
-                    && p.getType() == net.minecraft.world.entity.EntityTypes.SNOWBALL) {
+                    && p.getType() == net.minecraft.world.entity.EntityType.SNOWBALL) {
                     snowballs++;
                     if (snowballAt == 0) snowballAt = now;
                     // Projectile.getAddEntityPacket: its owner's id.
                     record("play-use", "snowball owner is the player: " + (p.getData() == playerId));
                 } else if (packet instanceof net.minecraft.network.protocol.game.ClientboundAddEntityPacket p
-                    && p.getType() == net.minecraft.world.entity.EntityTypes.VILLAGER) {
+                    && p.getType() == net.minecraft.world.entity.EntityType.VILLAGER) {
                     villager = p.getId();
                     villagerAt = new net.minecraft.world.phys.Vec3(p.getX(), p.getY(), p.getZ());
                 } else if (packet instanceof net.minecraft.network.protocol.game.ClientboundOpenScreenPacket p && step > 6 + REPLIES.length) {

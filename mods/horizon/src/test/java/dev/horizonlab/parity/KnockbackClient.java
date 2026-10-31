@@ -341,7 +341,7 @@ public final class KnockbackClient {
                         id = l.playerId();
                         seen.put(id, "self");
                     } else if (p instanceof net.minecraft.network.protocol.game.ClientboundAddEntityPacket a) {
-                        String who = a.getType() == net.minecraft.world.entity.EntityTypes.PLAYER
+                        String who = a.getType() == net.minecraft.world.entity.EntityType.PLAYER
                             ? NAMES.getOrDefault(a.getUUID(), "uuid?")
                             : net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(a.getType()).getPath();
                         seen.put(a.getId(), who);

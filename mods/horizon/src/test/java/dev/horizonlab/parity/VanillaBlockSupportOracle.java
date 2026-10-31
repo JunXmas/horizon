@@ -18,7 +18,7 @@ public final class VanillaBlockSupportOracle {
    VanillaCollisionOracle.main(new String[]{"generate",args[1]});
    var grid=VanillaCollisionOracle.class.getDeclaredMethod("grid",VoxelShape.class);grid.setAccessible(true);
    var states=new ListTag();var shapes=new ListTag();var ids=new IdentityHashMap<VoxelShape,Integer>();int[] mapping=new int[Block.BLOCK_STATE_REGISTRY.size()];
-   for(var state:Block.BLOCK_STATE_REGISTRY){int id=Block.getId(state);states.add(BlockState.FULL_CODEC.encodeStart(NbtOps.INSTANCE,state).getOrThrow());if(cache.get(state)==null){mapping[id]=-1;continue;}
+   for(var state:Block.BLOCK_STATE_REGISTRY){int id=Block.getId(state);states.add(BlockState.CODEC.encodeStart(NbtOps.INSTANCE,state).getOrThrow());if(cache.get(state)==null){mapping[id]=-1;continue;}
     var shape=state.getBlockSupportShape(EmptyBlockGetter.INSTANCE,BlockPos.ZERO);Integer shapeId=ids.get(shape);if(shapeId==null){shapeId=shapes.size();ids.put(shape,shapeId);shapes.add((CompoundTag)grid.invoke(null,shape));}mapping[id]=shapeId;
    }
    var cachedIds=new com.google.gson.JsonArray();for(int i=0;i<mapping.length;i++)if(mapping[i]>=0)cachedIds.add(i);Files.writeString(dir.resolve("support-cached-states.json"),cachedIds.toString());

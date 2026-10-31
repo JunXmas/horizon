@@ -373,10 +373,10 @@ public final class VanillaTradingOracle {
         AbstractVillager merchant(ServerLevel level, String spec, double[] at, Long randomSeed) throws Exception {
             AbstractVillager v;
             if (spec.equals("wt")) {
-                v = net.minecraft.world.entity.EntityTypes.WANDERING_TRADER.create(level, EntitySpawnReason.COMMAND);
+                v = net.minecraft.world.entity.EntityType.WANDERING_TRADER.create(level, EntitySpawnReason.COMMAND);
             } else {
                 String[] p = spec.split(":");
-                Villager villager = net.minecraft.world.entity.EntityTypes.VILLAGER.create(level, EntitySpawnReason.COMMAND);
+                Villager villager = net.minecraft.world.entity.EntityType.VILLAGER.create(level, EntitySpawnReason.COMMAND);
                 Holder<VillagerType> type = BuiltInRegistries.VILLAGER_TYPE.getOrThrow(
                     ResourceKey.create(Registries.VILLAGER_TYPE, Identifier.withDefaultNamespace(p[1])));
                 Holder<VillagerProfession> prof = BuiltInRegistries.VILLAGER_PROFESSION.getOrThrow(
