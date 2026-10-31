@@ -592,7 +592,7 @@ impl LargeDripstoneFeature {
                 .map(|raw| int_range(raw, "floor_to_ceiling_search_range", 1, 512))
                 .transpose()?
                 .unwrap_or(30),
-            column_radius: decoder.int_provider(required(&object, "column_radius")?, 1, 16)?,
+            column_radius: decoder.int_provider(required(&object, "column_radius")?, 1, 60)?,
             height_scale: float_provider(required(&object, "height_scale")?, 0.0, 20.0)?,
             max_radius_ratio: float_range(
                 required(&object, "max_column_radius_to_cave_height_ratio")?,

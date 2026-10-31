@@ -63,12 +63,87 @@ pub(super) fn feature(v: &Value, report: &mut Report) -> Value {
     if t == "tree" {
         below_trunk(&mut n);
     }
+    hardcoded(t, &mut n);
+    let t = match t {
+        "forest_rock" => "block_blob",
+        "ice_spike" => "spike",
+        "dripstone_cluster" => "speleothem_cluster",
+        "pointed_dripstone" => "speleothem",
+        other => other,
+    };
+    n.insert("type".into(), vanilla(t));
     let mut v = Value::Object(n);
     // Providers first: a simple state provider becomes its state in object form
     // (`{"id": ...}`), which 26.x reads as a state where a bare name would be a provider id.
     nested(&mut v, report);
     states(&mut v);
     v
+    }
+
+    /// What 1.21.11's feature classes hardcode, written as the fields 26.x reads (each from
+    /// that class's `place`): lake replacement rules, huge mushroom soil, dripstone blocks,
+    /// the forest rock and ice spike block checks.
+    fn hardcoded(t: &str, f: &mut Map<String, Value>) {
+        let not_tag = |tag: &str| json!({"type": "minecraft:not", "predicate":
+            {"type": "minecraft:matching_block_tag", "tag": tag}});
+        let rename = |f: &mut Map<String, Value>, from: &str, to: &str| {
+            if let Some(v) = f.remove(from) {
+                f.insert(to.into(), v);
+            }
+        };
+        let dripstone = |f: &mut Map<String, Value>| {
+            f.insert("base_block".into(), json!("minecraft:dripstone_block"));
+            f.insert("pointed_block".into(), json!("minecraft:pointed_dripstone"));
+            f.insert("replaceable_blocks".into(), json!("#minecraft:dripstone_replaceable_blocks"));
+        };
+        match t {
+            // LakeFeature: always places; canReplaceBlock and the barrier's stone check.
+            "lake" => {
+                f.insert("can_place_feature".into(), json!({"type": "minecraft:true"}));
+                f.insert("can_replace_with_air_or_fluid".into(), not_tag("minecraft:features_cannot_replace"));
+                f.insert("can_replace_with_barrier".into(), not_tag("minecraft:lava_pool_stone_cannot_replace"));
+            }
+            // AbstractHugeMushroomFeature.isValidPosition: #dirt or #mushroom_grow_block below.
+            "huge_red_mushroom" | "huge_brown_mushroom" => {
+                f.insert("can_place_on".into(), json!({"type": "minecraft:any_of", "predicates": [
+                    {"type": "minecraft:matching_block_tag", "tag": "minecraft:dirt"},
+                    {"type": "minecraft:matching_block_tag", "tag": "minecraft:mushroom_grow_block"}]}));
+            }
+            // BlockBlobFeature: lands on #dirt or #base_stone_overworld.
+            "forest_rock" => {
+                f.insert("can_place_on".into(), json!({"type": "minecraft:any_of", "predicates": [
+                    {"type": "minecraft:matching_block_tag", "tag": "minecraft:dirt"},
+                    {"type": "minecraft:matching_block_tag", "tag": "minecraft:base_stone_overworld"}]}));
+            }
+            // IceSpikeFeature: stands on snow blocks, replaces air, #dirt, snow blocks and ice.
+            "ice_spike" => {
+                f.insert("state".into(), json!("minecraft:packed_ice"));
+                f.insert("can_place_on".into(), json!({"type": "minecraft:matching_blocks", "blocks": "minecraft:snow_block"}));
+                f.insert("can_replace".into(), json!({"type": "minecraft:any_of", "predicates": [
+                    {"type": "minecraft:matching_block_tag", "tag": "minecraft:air"},
+                    {"type": "minecraft:matching_block_tag", "tag": "minecraft:dirt"},
+                    {"type": "minecraft:matching_blocks", "blocks": ["minecraft:snow_block", "minecraft:ice"]}]}));
+            }
+            "large_dripstone" => {
+                f.insert("replaceable_blocks".into(), json!("#minecraft:dripstone_replaceable_blocks"));
+            }
+            "dripstone_cluster" => {
+                dripstone(f);
+                rename(f, "dripstone_block_layer_thickness", "speleothem_block_layer_thickness");
+                rename(f, "chance_of_dripstone_column_at_max_distance_from_center", "chance_of_speleothem_at_max_distance_from_center");
+                rename(f, "max_distance_from_edge_affecting_chance_of_dripstone_column", "max_distance_from_edge_affecting_chance_of_speleothem");
+            }
+            "pointed_dripstone" => {
+                dripstone(f);
+                rename(f, "chance_of_taller_dripstone", "chance_of_taller_generation");
+            }
+            // RootSystemFeature has no level test in 1.21.11.
+            "root_system" => {
+                f.entry("level_test_distance").or_insert(json!(0));
+                f.entry("max_level_deviation").or_insert(json!(0));
+            }
+            _ => {}
+        }
     }
 
     /// A tree's `dirt_provider` and `force_dirt` (1.21.11 and older) as 26.x's
@@ -119,7 +194,11 @@ fn nested(v: &mut Value, report: &mut Report) {
                         return;
                     }
                     o.insert("type".into(), vanilla(to));
-                }
+                    // Noise providers carry their noise parameters inline, in the old form.
+                    if let Some(n) = o.get("noise").filter(|n| n.get("firstOctave").is_some()).cloned() {
+                        o.insert("noise".into(), super::noise::noise(&n, report));
+                    }
+                    }
             }
             // An inline placed feature: {feature, placement}.
             if o.contains_key("placement") && o.contains_key("feature") {
