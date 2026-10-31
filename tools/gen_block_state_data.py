@@ -35,7 +35,7 @@ TOKEN_RE = re.compile(
     | (?P<lcomment>//[^\n]*)
     | (?P<bcomment>/\*.*?\*/)
     | (?P<string>"(?:[^"\\]|\\.)*")
-    | (?P<ident>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)
+    | (?P<ident>[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)
     | (?P<number>-?[0-9]+)
     | (?P<punct>[(),;{}=<>?\[\].@!\-+*/%|&~:^'])
     """,
