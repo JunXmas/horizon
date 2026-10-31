@@ -1915,7 +1915,6 @@ packet_enum!(Clientbound, crate::ids::play::clientbound {
     ChunkBatchFinished(ChunkBatchFinished) = CHUNK_BATCH_FINISHED,
     ChunkBatchStart(Empty) = CHUNK_BATCH_START,
     ClearTitles(Bool1) = CLEAR_TITLES,
-    LowDiskSpaceWarning(Empty) = LOW_DISK_SPACE_WARNING,
     Commands(Commands) = COMMANDS,
     RecipeBookAdd(super::recipes::RecipeBookAdd) = RECIPE_BOOK_ADD,
     RecipeBookRemove(super::recipes::RecipeBookRemove) = RECIPE_BOOK_REMOVE,
@@ -1938,7 +1937,6 @@ packet_enum!(Clientbound, crate::ids::play::clientbound {
     ForgetLevelChunk(ForgetLevelChunk) = FORGET_LEVEL_CHUNK,
     GameEvent(GameEvent) = GAME_EVENT,
     GameTestHighlightPos(GameTestHighlightPos) = GAME_TEST_HIGHLIGHT_POS,
-    GameRuleValues(GameRuleValues) = GAME_RULE_VALUES,
     HurtAnimation(HurtAnimation) = HURT_ANIMATION,
     DamageEvent(DamageEvent) = DAMAGE_EVENT,
     KeepAlive(KeepAlive) = KEEP_ALIVE,
@@ -1966,7 +1964,6 @@ packet_enum!(Clientbound, crate::ids::play::clientbound {
     PlayerLookAt(PlayerLookAt) = PLAYER_LOOK_AT,
     PlayerPosition(PlayerPosition) = PLAYER_POSITION,
     PlayerRotation(PlayerRotation) = PLAYER_ROTATION,
-    PostEffects(PostEffects) = POST_EFFECTS,
     RemoveEntities(RemoveEntities) = REMOVE_ENTITIES,
     RemoveMobEffect(RemoveMobEffect) = REMOVE_MOB_EFFECT,
     ResetScore(ResetScore) = RESET_SCORE,
@@ -2016,7 +2013,6 @@ packet_enum!(Clientbound, crate::ids::play::clientbound {
     // A common packet: the same `configuration::ServerLinks` the
     // configuration phase sends.
     ServerLinks(ServerLinks) = SERVER_LINKS,
-    SwingAnimation(SwingAnimation) = SWING_ANIMATION,
     SystemChat(SystemChat) = SYSTEM_CHAT,
     TabList(TabList) = TAB_LIST,
     TagQuery(TagQuery) = TAG_QUERY,
@@ -2030,7 +2026,6 @@ packet_enum!(Clientbound, crate::ids::play::clientbound {
     UpdateAttributes(UpdateAttributes) = UPDATE_ATTRIBUTES,
     LevelParticles(LevelParticles) = LEVEL_PARTICLES,
     Explode(Explode) = EXPLODE,
-    AddTransientBlock(AddTransientBlock) = ADD_TRANSIENT_BLOCK,
     UpdateMobEffect(UpdateMobEffect) = UPDATE_MOB_EFFECT,
     UpdateTags(UpdateTags) = UPDATE_TAGS,
     TrackedWaypoint(TrackedWaypoint) = WAYPOINT,
@@ -2508,7 +2503,57 @@ packet!(
     /// optional `mob_effect` id.
     SetBeacon { primary: Option<i32> => Opt<VarInt>, secondary: Option<i32> => Opt<VarInt> }
 );
-packet!(Interact { id: i32 => VarInt, hand: i32 => VarInt, location: [f64; 3] => LpVec3, secondary: bool => Bool });
+/// ServerboundInteractPacket.ActionType (1.21.11): what the click on the entity does. The client
+/// sends `InteractAt` first (only an armor stand acts on it), then `Interact` when that did nothing.
+#[derive(Clone, Debug, PartialEq)]
+pub enum InteractAction {
+    Interact { hand: i32 },
+    Attack,
+    /// The hit point relative to the entity's position, as floats.
+    InteractAt { hand: i32, location: [f32; 3] },
+}
+/// ServerboundInteractPacket: the target, the action and whether the player sneaks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Interact {
+    pub id: i32,
+    pub action: InteractAction,
+    pub secondary: bool,
+}
+impl Codec<Interact> for Interact {
+    fn read(r: &mut Reader) -> Result<Interact> {
+        let id = r.varint()?;
+        let action = match r.varint()? {
+            0 => InteractAction::Interact { hand: r.varint()? },
+            1 => InteractAction::Attack,
+            2 => {
+                let location = [r.f32()?, r.f32()?, r.f32()?];
+                InteractAction::InteractAt { hand: r.varint()?, location }
+            }
+            other => return Err(crate::Error::new(format!("unknown interact action {other}"))),
+        };
+        Ok(Interact { id, action, secondary: r.bool()? })
+    }
+    fn write(v: &Interact, w: &mut Writer) {
+        w.varint(v.id);
+        match v.action {
+            InteractAction::Interact { hand } => {
+                w.varint(0);
+                w.varint(hand);
+            }
+            InteractAction::Attack => w.varint(1),
+            InteractAction::InteractAt { hand, location } => {
+                w.varint(2);
+                location.iter().for_each(|f| w.f32(*f));
+                w.varint(hand);
+            }
+        }
+        w.bool(v.secondary);
+    }
+}
+packet!(
+    /// ServerboundSwingPacket (1.21.11): the client swung this hand (0 main, 1 off).
+    Swing { hand: i32 => VarInt }
+);
 packet!(
     /// ServerboundMovePlayerPacket flags: 1 on ground, 2 horizontal collision.
     MovePlayerPos { x: f64 => Double, y: f64 => Double, z: f64 => Double, flags: u8 => UByte }
@@ -2573,13 +2618,10 @@ impl Codec<[f32; 3]> for Cursor {
 packet_enum!(Serverbound, crate::ids::play::serverbound {
     ChangeDifficulty(ChangeDifficultyRequest) = CHANGE_DIFFICULTY,
     LockDifficulty(LockDifficulty) = LOCK_DIFFICULTY,
-    SetGameRule(SetGameRule) = SET_GAME_RULE,
     AcceptTeleportation(AcceptTeleportation) = ACCEPT_TELEPORTATION,
-    Attack(Attack) = ATTACK,
     BlockEntityTagQuery(BlockEntityTagQuery) = BLOCK_ENTITY_TAG_QUERY,
     EntityTagQuery(EntityTagQuery) = ENTITY_TAG_QUERY,
     TeleportToEntity(TeleportToEntity) = TELEPORT_TO_ENTITY,
-    SpectatorAction(SpectatorAction) = SPECTATOR_ACTION,
     ChangeGameMode(ChangeGameMode) = CHANGE_GAME_MODE,
     Chat(Chat) = CHAT,
     ChatAck(ChatAck) = CHAT_ACK,
@@ -2619,7 +2661,7 @@ packet_enum!(Serverbound, crate::ids::play::serverbound {
     Pong(Ping) = PONG,
     RenameItem(RenameItem) = RENAME_ITEM,
     ContainerSlotStateChanged(ContainerSlotStateChanged) = CONTAINER_SLOT_STATE_CHANGED,
-    Punch(Empty) = PUNCH,
+    Swing(Swing) = SWING,
     JigsawGenerate(JigsawGenerate) = JIGSAW_GENERATE,
     ResourcePack(ResourcePackResponse) = RESOURCE_PACK,
     SelectBundleItem(SelectBundleItem) = BUNDLE_ITEM_SELECTED,
@@ -2717,43 +2759,15 @@ mod tests {
 
     #[test]
     fn world_options_packets_match_vanilla_stream_codecs() {
-        // mcsrc.dev 26.3: difficulty is a VarInt, locking is a Boolean,
-        // rule entries are ResourceKey identifiers followed by UTF-8 values.
+        // 1.21.11: difficulty is a VarInt, locking is a Boolean (game rules are
+        // changed by command; there is no game rule packet).
         let difficulty = Serverbound::ChangeDifficulty(ChangeDifficultyRequest { difficulty: 3 });
         assert_eq!(&difficulty.encode()[1..], &[3]);
         round_trip(difficulty, Serverbound::encode, Serverbound::decode);
         let lock = Serverbound::LockDifficulty(LockDifficulty { locked: true });
         assert_eq!(&lock.encode()[1..], &[1]);
         round_trip(lock, Serverbound::encode, Serverbound::decode);
-        let payload = b"\x01\x18minecraft:keep_inventory\x04true";
-        let entry = GameRuleEntry {
-            name: "minecraft:keep_inventory".into(),
-            value: "true".into(),
-        };
-        let set = Serverbound::SetGameRule(SetGameRule {
-            entries: vec![entry.clone()],
-        });
-        assert_eq!(&set.encode()[1..], payload);
-        assert_eq!(
-            Serverbound::decode(crate::ids::play::serverbound::SET_GAME_RULE, payload).unwrap(),
-            set
-        );
-        let values = Clientbound::GameRuleValues(GameRuleValues {
-            entries: vec![entry],
-        });
-        assert_eq!(&values.encode()[1..], payload);
-        assert_eq!(
-            Clientbound::decode(crate::ids::play::clientbound::GAME_RULE_VALUES, payload).unwrap(),
-            values
-        );
-        assert!(
-            Serverbound::decode(
-                crate::ids::play::serverbound::SET_GAME_RULE,
-                &payload[..payload.len() - 1]
-            )
-            .is_err()
-        );
-    }
+        }
 
     fn spawn() -> SpawnInfo {
         SpawnInfo {
@@ -2783,7 +2797,9 @@ mod tests {
             color: Some(0xFFFF_5555_u32 as i32),
             target: WaypointTarget::Block([1, -2, 300]),
         });
-        let mut expected = vec![141, 1, 0, 1];
+        let waypoint = crate::ids::play::clientbound::WAYPOINT;
+        // The id (136 on 1.21.11) is a two-byte VarInt.
+        let mut expected = vec![(waypoint & 0x7F | 0x80) as u8, (waypoint >> 7) as u8, 0, 1];
         expected.extend(1..=16u8);
         expected.push(17);
         expected.extend(b"minecraft:default");
@@ -2791,7 +2807,7 @@ mod tests {
             1, 0xFF, 0x55, 0x55, 1, 1, 0xFE, 0xFF, 0xFF, 0xFF, 0x0F, 0xAC, 0x02,
         ]);
         assert_eq!(track.encode(), expected);
-        assert_eq!(Clientbound::decode(141, &expected[2..]).unwrap(), track);
+        assert_eq!(Clientbound::decode(waypoint, &expected[2..]).unwrap(), track);
         for target in [
             WaypointTarget::Empty,
             WaypointTarget::Chunk([-3, 4]),
@@ -2805,7 +2821,7 @@ mod tests {
                 target,
             });
             let bytes = packet.encode();
-            assert_eq!(Clientbound::decode(141, &bytes[2..]).unwrap(), packet);
+            assert_eq!(Clientbound::decode(waypoint, &bytes[2..]).unwrap(), packet);
         }
     }
 
@@ -2813,7 +2829,6 @@ mod tests {
     fn clientbound_round_trips() {
         let packets = vec![
             Clientbound::BundleDelimiter(Empty),
-            Clientbound::LowDiskSpaceWarning(Empty),
             Clientbound::PongResponse(crate::packets::status::Ping { time: 1_234_567 }),
             Clientbound::SetBorderCenter(SetBorderCenter { x: 1.5, z: -2.0 }),
             Clientbound::SetBorderLerpSize(SetBorderLerpSize {
@@ -2884,10 +2899,6 @@ mod tests {
                 data: 0,
             }),
             Clientbound::BlockUpdate(BlockUpdate {
-                pos: [-5, -60, 7],
-                state: 1,
-            }),
-            Clientbound::AddTransientBlock(AddTransientBlock {
                 pos: [-5, -60, 7],
                 state: 1,
             }),
@@ -3311,7 +3322,7 @@ mod tests {
             }),
             Serverbound::PlayerInput(PlayerInput { flags: 0b0101_0001 }),
             Serverbound::PlayerLoaded(Empty),
-            Serverbound::Punch(Empty),
+            Serverbound::Swing(Swing { hand: 1 }),
             Serverbound::SetCarriedItem(SetCarriedItem { slot: 4 }),
             Serverbound::UseItemOn(UseItemOn {
                 hand: 0,
@@ -3324,25 +3335,28 @@ mod tests {
             }),
             Serverbound::Interact(Interact {
                 id: 9,
-                hand: 0,
-                location: [0.25, 1.0, 0.0],
+                action: InteractAction::InteractAt { hand: 1, location: [0.25, 1.0, 0.0] },
                 secondary: false,
             }),
-        ];
-        for p in packets {
-            if let Serverbound::Interact(_) = &p {
-                // LpVec3 is lossy; check bytes instead.
-                let body = p.encode();
-                let mut r = Reader::new(&body);
-                let id = r.varint().unwrap();
-                assert!(matches!(
-                    Serverbound::decode(id, r.rest()).unwrap(),
-                    Serverbound::Interact(Interact { id: 9, .. })
-                ));
-                continue;
+            Serverbound::Interact(Interact { id: 9, action: InteractAction::Attack, secondary: true }),
+            Serverbound::Interact(Interact { id: 9, action: InteractAction::Interact { hand: 0 }, secondary: false }),
+            ];
+            for p in packets {
+                round_trip(p, Serverbound::encode, Serverbound::decode);
             }
-            round_trip(p, Serverbound::encode, Serverbound::decode);
-        }
+            // 1.21.11's ServerboundInteractPacket bytes: entity 9, INTERACT_AT (2), x y z floats, hand 1, sneaking.
+            let at = Serverbound::Interact(Interact {
+                id: 9,
+                action: InteractAction::InteractAt { hand: 1, location: [0.25, 1.0, 0.0] },
+                secondary: true,
+            });
+            let mut expected = vec![9, 2];
+            for f in [0.25f32, 1.0, 0.0] {
+                expected.extend(f.to_be_bytes());
+            }
+            expected.extend([1, 1]);
+            assert_eq!(at.encode()[1..], expected);
+            assert_eq!(Serverbound::Interact(Interact { id: 9, action: InteractAction::Attack, secondary: false }).encode()[1..], [9, 1, 0]);
         round_trip(
             Serverbound::SelectTrade(SelectTrade { item: 3 }),
             Serverbound::encode,
@@ -3448,7 +3462,7 @@ mod tests {
     fn change_game_mode_uses_the_game_type_varint() {
         for mode in 0..=3 {
             let packet = Serverbound::ChangeGameMode(ChangeGameMode { mode });
-            assert_eq!(packet.encode(), vec![5, mode as u8]);
+            assert_eq!(packet.encode(), vec![crate::ids::play::serverbound::CHANGE_GAME_MODE as u8, mode as u8]);
             round_trip(packet, Serverbound::encode, Serverbound::decode);
         }
     }
@@ -3496,24 +3510,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn post_effects_round_trips() {
-        let p = PostEffects {
-            effects: vec!["minecraft:invert".into(), "pack:glow".into()],
-        };
-        let bytes = Clientbound::PostEffects(p.clone()).encode();
-        assert_eq!(
-            Clientbound::decode(crate::ids::play::clientbound::POST_EFFECTS, &bytes[1..]).unwrap(),
-            Clientbound::PostEffects(p)
-        );
-        // The empty list the server sends on join.
-        assert_eq!(
-            Clientbound::decode(crate::ids::play::clientbound::POST_EFFECTS, &[0]).unwrap(),
-            Clientbound::PostEffects(PostEffects {
-                effects: Vec::new()
-            })
-        );
-    }
 
     /// ClientboundChunksBiomesPacket is read, not passed through as an
     /// unknown packet: one column (1, -2) with two bytes of biomes.
@@ -3586,18 +3582,6 @@ mod tests {
         assert_eq!(p.encode()[1..], [0xAC, 0x02]);
     }
 
-    /// ServerboundSpectatorActionPacket: `OPTIONAL_VAR_INT`, the clicked
-    /// entity's id plus one, or 0 for a click on nothing.
-    #[test]
-    fn spectator_action_is_an_optional_entity_id() {
-        let id = crate::ids::play::serverbound::SPECTATOR_ACTION;
-        for (bytes, shown) in [([8u8], "Some(7)"), ([0u8], "None")] {
-            let p = Serverbound::decode(id, &bytes).unwrap();
-            assert!(!matches!(p, Serverbound::Unknown(..)), "{p:?}");
-            assert!(format!("{p:?}").contains(shown), "{p:?}");
-            assert_eq!(p.encode()[1..], bytes);
-        }
-    }
 
     #[test]
     fn unknown_packets_keep_their_payload() {
@@ -3625,16 +3609,16 @@ mod tests {
             }],
         });
         let body = p.encode();
-        // The packet id (134) is a two-byte VarInt.
-        let mut expected = vec![134, 1, 5, 1, 1];
+        // The packet id (129 on 1.21.11) is a two-byte VarInt.
+        let mut expected = vec![0x81, 1, 5, 1, 1];
         expected.extend(0.0f64.to_be_bytes());
         expected.extend([1, 22]);
         expected.extend(b"minecraft:armor.helmet");
         expected.extend(3.0f64.to_be_bytes());
         expected.push(0);
         assert_eq!(body, expected);
-        assert_eq!(crate::ids::play::clientbound::UPDATE_ATTRIBUTES, 134);
-        assert_eq!(Clientbound::decode(134, &body[2..]).unwrap(), p);
+        assert_eq!(crate::ids::play::clientbound::UPDATE_ATTRIBUTES, 129);
+        assert_eq!(Clientbound::decode(129, &body[2..]).unwrap(), p);
     }
 
     #[test]
