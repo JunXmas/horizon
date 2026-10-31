@@ -504,11 +504,20 @@ def inventory(jar):
 def prepare(minecraft=None, server_jar=None):
     lock, directory = config()
     manifest, client = import_client(lock, directory, minecraft)
-    if "client_mappings" in manifest["downloads"] or "server_mappings" in manifest["downloads"]:
-        raise ValueError("This workflow targets unobfuscated releases. Older releases need a remapping stage.")
     print(f"Imported client {manifest['id']} from {minecraft_dir(minecraft)}", flush=True)
     jars = {"client": client, "server": import_server(lock, directory, server_jar)}
     jars["server"], server_libraries = unpack_server(jars["server"], directory, manifest["id"])
+    if "client_mappings" in manifest["downloads"]:
+        # Obfuscated (1.21.11 and older): the tools read Mojang's names (tools/remap.py).
+        try:
+            from . import remap
+        except ImportError:
+            import remap
+        java = shutil.which("java") or "java"
+        for side in jars:
+            mapping = manifest["downloads"][f"{side}_mappings"]
+            text = download(mapping["url"], directory / "jars" / f"{side}-mappings.txt", mapping["sha1"])
+            jars[side] = remap.remap(java, jars[side], text, directory / "jars" / f"{side}-named.jar")
     client_libraries = [import_library(artifact, directory / "libraries" / "client", minecraft)
                         for artifact in client_library_artifacts(manifest)]
     vf = lock["vineflower"]
