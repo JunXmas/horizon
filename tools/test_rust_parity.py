@@ -99,6 +99,12 @@ def verify_artifacts():
             if lab.digest(library, "sha256") != checksum:
                 raise ValueError(f"Dependency checksum changed: {relative}")
             libraries.append(library)
+    if "client_mappings" in manifest["downloads"]:
+        # Obfuscated (1.21.11 and older): oracles compile against the jars lab.py prepare remapped.
+        for side in jars:
+            jars[side] = directory / "jars" / f"{side}-named.jar"
+            if not jars[side].exists():
+                raise ValueError(f"No remapped {side} jar; run tools/lab.py prepare")
     return lock, jars, libraries
 
 
