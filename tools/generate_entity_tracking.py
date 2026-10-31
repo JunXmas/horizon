@@ -21,7 +21,9 @@ INT_MAX = 2147483647
 
 
 def parse(sources):
-    text = (sources / "net/minecraft/world/entity/EntityTypes.java").read_text()
+    entity = sources / "net/minecraft/world/entity"
+    # 26.1 moved the declarations from EntityType to EntityTypes.
+    text = next(f for f in [entity / "EntityTypes.java", entity / "EntityType.java"] if f.exists()).read_text()
     out = []
     for m in re.finditer(r"public static final EntityType<[\w.]+> (\w+) = register\((.*?)\n   \);", text, re.S):
         name, body = m.group(1).lower(), m.group(2)

@@ -32,8 +32,9 @@ except ImportError:
     import lab
 
 # Classes whose decompiled source a generator parses: (side, class).
-SOURCES = [("client", "net/minecraft/world/entity/EntityTypes"),
-           ("server", "net/minecraft/util/datafix/fixes/BlockStateData")]
+# 1.21.11 and older declare the entity types in EntityType itself; 26.1 moved them to EntityTypes.
+SOURCES = [("client", ("net/minecraft/world/entity/EntityTypes", "net/minecraft/world/entity/EntityType")),
+           ("server", ("net/minecraft/util/datafix/fixes/BlockStateData",))]
 PARITY = "mods/horizon/src/test/java/dev/horizonlab/parity"
 
 
@@ -186,11 +187,13 @@ def decompile_classes(root, version, store):
     lock = json.loads((root / "research-lock.json").read_text())
     vineflower = root / ".local" / "tools" / f"vineflower-{lock['vineflower']['version']}.jar"
     prepared = json.loads((root / ".local" / "minecraft" / version / "prepared.json").read_text())
-    for side, name in SOURCES:
+    for side, names in SOURCES:
         output = store / "sources" / side
+        jar = root / prepared["jars"][side]
+        with zipfile.ZipFile(jar) as full:
+            name = next(n for n in names if f"{n}.class" in full.namelist())
         if (output / f"{name}.java").exists():
             continue
-        jar = root / prepared["jars"][side]
         with tempfile.TemporaryDirectory(prefix=".decompile-", dir=store) as scratch:
             scratch = Path(scratch)
             small = scratch / "classes.jar"
