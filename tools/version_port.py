@@ -41,7 +41,7 @@ import urllib.request
 import zipfile
 
 try:
-    from . import class_index, lab, port_harness, port_publish, port_regen, port_report, vanilla_map
+    from . import class_index, lab, port_harness, port_publish, port_regen, port_report, remap, vanilla_map
 except ImportError:
     import class_index
     import lab
@@ -49,6 +49,7 @@ except ImportError:
     import port_publish
     import port_regen
     import port_report
+    import remap
     import vanilla_map
 
 MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
@@ -210,8 +211,6 @@ def prepare_download(version, directory):
     if not (version_json.exists() and lab.digest(version_json, "sha1") == entry["sha1"]):
         version_json.write_bytes(fetch_json(entry["url"], entry["sha1"]))
     meta = json.loads(version_json.read_text())
-    if "client_mappings" in meta["downloads"]:
-        raise SystemExit(f"{version} is obfuscated; the pipeline handles unobfuscated releases (26.1 and later)")
     jars = directory / "jars"
     found = {"version_json": version_json}
     for side in ["client", "server"]:
@@ -219,6 +218,15 @@ def prepare_download(version, directory):
         print(f"Fetching the {version} {side} jar ({download['size'] // 1_000_000} MB)", flush=True)
         found[side] = lab.download(download["url"], jars / f"{side}.jar", download["sha1"])
     found["server_game"] = unpack_game(found["server"], jars / "server-game.jar", version)
+    if "client_mappings" in meta["downloads"]:
+        # Obfuscated (1.21.11 and older): index and diff Mojang's names. The data generator still runs the
+        # original bundler, whose reports don't depend on names.
+        java = java_command(meta["javaVersion"]["majorVersion"])
+        for key, mappings in [("client", "client_mappings"), ("server_game", "server_mappings")]:
+            mapping = meta["downloads"][mappings]
+            text = lab.download(mapping["url"], jars / f"{key}-mappings.txt", mapping["sha1"])
+            print(f"Remapping the {version} {key} jar to Mojang's names", flush=True)
+            found[key] = remap.remap(java, found[key], text, jars / f"{key}-named.jar")
     found["reports"] = directory / "datagen" / "reports"
     if not found["reports"].exists():
         print(f"Running the {version} data generator", flush=True)
@@ -444,6 +452,8 @@ def read_reports(reports):
     items = {}
     for path in sorted((reports / "minecraft" / "components" / "item").glob("*.json")):
         items[f"minecraft:{path.stem}"] = json.loads(path.read_text())["components"]
+    if (reports / "items.json").exists():  # 1.21.11 and older: one file for every item
+        items |= {name: entry["components"] for name, entry in json.loads((reports / "items.json").read_text()).items()}
     return {
         "packets": json.loads((reports / "packets.json").read_text()),
         "registries": json.loads((reports / "registries.json").read_text()),
