@@ -27,7 +27,7 @@ use horizon_core::{
     random::RandomSource,
 };
 use horizon_protocol::{
-    packets::play::{self, Clientbound as C, Serverbound as S},
+    packets::play::{self, Clientbound as C, InteractAction, Serverbound as S},
     text::literal,
 };
 use horizon_world::entity_move::EntityMoveWorld;
@@ -1347,13 +1347,12 @@ impl Game<'_> {
                     play.using = None;
                 }
             }
-            // ServerGamePacketListenerImpl.handlePunch: the main hand swings
-            // with the held item's attack animation (mining, attacking, a
-            // click on nothing), seen by the players around, and the attack
-            // strength starts again.
-            S::Punch(_) => {
+            // ServerGamePacketListenerImpl.handleAnimate (1.21.11): that hand swings, seen by the
+            // players around; ServerPlayer.swing starts the attack strength again.
+            S::Swing(p) => {
+                let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
                 self.as_guest(host, conn, |g| {
-                    g.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
+                    g.swing_hand(hand, SwingAnimation::DEFAULT);
                     g.reset_attack_strength();
                 });
             }
@@ -1487,8 +1486,25 @@ impl Game<'_> {
                 self.lan_swing_back(host, conn, swung);
                 self.guest_instrument_sound(host, conn, heard, horn);
             }
-            S::Attack(p) => self.guest_attack(host, conn, p.id),
+            // handleInteract (1.21.11): an attack is one of its actions; a spectator's attack
+            // makes it watch through the target (ServerPlayer.attack -> setCamera).
+            S::Interact(p) if p.action == InteractAction::Attack => {
+                if spectator {
+                    self.guest_spectator_action(host, gi, Some(p.id));
+                } else {
+                    self.guest_attack(host, conn, p.id);
+                }
+            }
             S::Interact(p) => {
+                // Only an armor stand acts on INTERACT_AT (Entity.interactAt passes); the client
+                // then sends INTERACT, which does the rest.
+                let (hand, location) = match p.action {
+                    InteractAction::InteractAt { hand, location } if self.armor_stands.iter().any(|a| a.id as i32 == p.id) => {
+                        (hand, location.map(f64::from))
+                    }
+                    InteractAction::Interact { hand } => (hand, [0.0, 1.0, 0.0]),
+                    _ => return,
+                };
                 // handleInteract: a target inside the world border, within the entity
                 // interaction range plus 3 of its box, or nothing happens.
                 if let Some(target) = self.guest_target_box(host, gi, p.id)
@@ -1501,12 +1517,12 @@ impl Game<'_> {
                 }
                 let before = host.hub.guests[gi].vehicle;
                 if self
-                    .look_at_entity(host, gi, p.id, Some(p.location))
+                    .look_at_entity(host, gi, p.id, Some(location))
                     .is_some()
                 {
                     // handleInteract: the entity and that hand only; a click the
                     // entity passes comes back as UseItem.
-                    let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
+                    let hand = if hand == 1 { Hand::Off } else { Hand::Main };
                     let swung = self.as_guest(host, conn, |g| {
                         g.guest_use = Some(GuestUse::Entity(hand));
                         let swings = g.swings_started;
@@ -1701,48 +1717,9 @@ impl Game<'_> {
                         locked: self.level.difficulty_locked,
                     }));
             }
-            S::ClientCommand(p) if p.action == 2 && host.hub.guests[gi].permission >= 2 => {
-                host.hub.send_to(
-                    conn,
-                    &C::GameRuleValues(play::GameRuleValues {
-                        entries: horizon_client::gamerules::RULES
-                            .iter()
-                            .map(|r| play::GameRuleEntry {
-                                name: format!("minecraft:{}", r.name),
-                                value: self.ui.rules.get(r.name).unwrap_or(r.default).to_string(),
-                            })
-                            .collect(),
-                    }),
-                );
-            }
-            S::SetGameRule(p) if host.hub.guests[gi].permission >= 2 => {
-                for entry in p.entries {
-                    if self.ui.rules.set_string(&entry.name, &entry.value) {
-                        let message = horizon_client::text::Text::tr(
-                            "commands.gamerule.set",
-                            &[&entry.name, &entry.value],
-                        );
-                        let content =
-                            horizon_client::lan::data::component_nbt(&message.component());
-                        for g in &host.hub.guests {
-                            if g.permission >= 2 {
-                                g.send(&C::SystemChat(play::SystemChat {
-                                    content: content.clone(),
-                                    overlay: false,
-                                }));
-                            }
-                        }
-                        if self.options.dedicated.is_none() && self.allow_commands() {
-                            self.system_message(message);
-                        }
-                    }
-                }
-                self.sync_rules();
-            }
             // handleTeleportToEntityPacket: a spectator goes to the player,
             // in whichever level they are.
             S::TeleportToEntity(p) if spectator => self.guest_spectate_teleport(host, gi, p.uuid),
-            S::SpectatorAction(p) => self.guest_spectator_action(host, gi, p.target),
             S::ChangeGameMode(p) if host.hub.guests[gi].permission >= 2 => {
                 if let Some(mode) = usize::try_from(p.mode)
                     .ok()
@@ -4006,15 +3983,10 @@ impl Game<'_> {
     }
 }
 
-/// ClientboundSwingAnimationPacket: the hand and the animation (its type and
-/// base duration; each client applies the swinger's haste and fatigue).
-fn swing_packet(id: i32, hand: Hand, animation: SwingAnimation) -> C {
-    C::SwingAnimation(play::SwingAnimation {
-        id,
-        hand: i32::from(hand == Hand::Off),
-        kind: i32::from(animation.kind),
-        duration: animation.duration,
-    })
+/// ClientboundAnimatePacket (1.21.11): SWING_MAIN_HAND (0) or SWING_OFF_HAND (3); the
+/// animation is always the default one.
+fn swing_packet(id: i32, hand: Hand, _animation: SwingAnimation) -> C {
+    C::Animate(play::Animate { id, action: if hand == Hand::Off { 3 } else { 0 } })
 }
 
 /// The block columns `Entity.isInWall` looks at: `AABB.ofSize` around the

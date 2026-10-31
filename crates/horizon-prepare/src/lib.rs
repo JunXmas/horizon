@@ -1156,6 +1156,10 @@ fn prepare_worldgen(run: &Run) -> Result<(), String> {
         {
             return Err(format!("Reference worldgen resources disagree: {path}"));
         }
+        let mut resources = resources;
+        if legacy && path == "tags/block" {
+            add_legacy_tags(&mut resources, &read_json(&root.join("legacy-motion-tags.json"))?)?;
+        }
         write_text(
             &out.join(format!("{name}.json")),
             &pyjson::dumps(&resources, &pyjson::COMPACT),

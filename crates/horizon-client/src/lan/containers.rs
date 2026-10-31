@@ -158,7 +158,8 @@ impl Hub {
     pub fn critical_hit(&self, attacker: i32, target: i32, magic: bool) {
         let body = C::Animate(play::Animate {
             id: target,
-            action: if magic { 2 } else { 1 },
+            // CRITICAL_HIT (4) and MAGIC_CRITICAL_HIT (5) on 1.21.11.
+            action: if magic { 5 } else { 4 },
         })
         .encode();
         for g in self.guests.iter().filter(|g| {
@@ -199,12 +200,8 @@ impl Hub {
         self.broadcast_near(
             at,
             128.0,
-            &C::SwingAnimation(play::SwingAnimation {
-                id,
-                hand,
-                kind: 1,
-                duration: 6,
-            }),
+            // 1.21.11: ClientboundAnimatePacket SWING_MAIN_HAND (0) or SWING_OFF_HAND (3).
+            &C::Animate(play::Animate { id, action: if hand == 1 { 3 } else { 0 } }),
             except,
         );
     }

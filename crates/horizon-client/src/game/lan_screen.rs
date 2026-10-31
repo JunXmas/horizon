@@ -460,20 +460,6 @@ impl Game<'_> {
             o.server_difficulty(difficulty, locked);
         }
     }
-    pub(super) fn remote_world_options_rules(&mut self, entries: Vec<play::GameRuleEntry>) {
-        let Some(o) = self
-            .world_options
-            .as_mut()
-            .filter(|o| o.view == View::GameRules)
-        else {
-            return;
-        };
-        let mut rules = horizon_client::gamerules::GameRules::default();
-        for entry in entries {
-            rules.set_string(&entry.name, &entry.value);
-        }
-        o.rules = Some(RulesScreen::new(&rules));
-    }
     pub(super) fn open_world_options(&mut self) {
         let hint = horizon_client::lan::available_port();
         let mut port = EditBox::new(0.0, 0.0, 150.0, 20.0);
@@ -558,16 +544,11 @@ impl Game<'_> {
             return;
         };
         if self.remote.is_some() {
-            if self.ui.registries.permission >= 2 && !changes.is_empty() {
-                self.send(S::SetGameRule(play::SetGameRule {
-                    entries: changes
-                        .into_iter()
-                        .map(|(name, value)| play::GameRuleEntry {
-                            name: format!("minecraft:{name}"),
-                            value: value.to_string(),
-                        })
-                        .collect(),
-                }));
+            // 1.21.11 has no game rule packet: the changes go as /gamerule commands.
+            if self.ui.registries.permission >= 2 {
+                for (name, value) in changes {
+                    self.send(S::ChatCommand(play::ChatCommand { command: format!("gamerule {name} {value}") }));
+                }
             }
             return;
         }
@@ -915,12 +896,10 @@ impl Game<'_> {
             Some(Button::Lock) => o.locked = !o.locked,
             Some(Button::Restrictions) => o.view = View::Restrictions,
             Some(Button::GameRules) => {
-                if self.remote.is_some() {
-                    o.rules = None;
-                    self.send(S::ClientCommand(play::ClientCommand { action: 2 }));
-                } else {
-                    o.rules = Some(RulesScreen::new(&self.ui.rules));
-                }
+                // ponytail: 1.21.11 cannot ask a server for its rules (no ClientCommand 2), so a
+                // remote world shows this client's copy; reading them back with /gamerule queries is
+                // the upgrade.
+                o.rules = Some(RulesScreen::new(&self.ui.rules));
                 o.view = View::GameRules;
             }
             Some(Button::Lan) => {

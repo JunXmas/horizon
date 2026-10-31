@@ -13,6 +13,14 @@ final class LegacyNames {
         "RedStoneWireBlock", "RedstoneWireBlock",
         "SnowyDirtBlock", "SnowyBlock",
         "SpreadingSnowyDirtBlock", "SpreadingSnowyBlock");
+        /** Overrides that only exist to halve the fall, which 26.1 does with Block.fallOn and the block's
+            fallDistanceReduction (exported by VanillaMovementRegistryOracle). */
+        private static final java.util.Set<String> PLAIN_FALL = java.util.Set.of("BedBlock");
+
+        /** The class owning `fallOn` as Horizon's landing families name it. */
+        static String fallOwner(Class<?> type) {
+            return PLAIN_FALL.contains(type.getSimpleName()) ? "Block" : name(type);
+        }
 
     static String name(Class<?> type) {
         return RENAMED.getOrDefault(type.getSimpleName(), type.getSimpleName());

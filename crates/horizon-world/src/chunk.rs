@@ -164,12 +164,14 @@ pub struct BlockState {
     pub properties: BTreeMap<String, String>,
 }
 impl BlockState {
+    /// `BlockState.CODEC` of 1.21.11: `Name` and `Properties` (26.1 renamed them `id` and
+    /// `properties`).
     pub fn to_nbt(&self) -> Tag {
         let mut map = Compound::new();
-        map.insert(key("id"), Tag::String(key(&self.name)));
+        map.insert(key("Name"), Tag::String(key(&self.name)));
         if !self.properties.is_empty() {
             map.insert(
-                key("properties"),
+                key("Properties"),
                 Tag::Compound(
                     self.properties
                         .iter()
@@ -187,11 +189,12 @@ impl BlockState {
                 properties: BTreeMap::new(),
             });
         }
-        let Some(Tag::String(name)) = tag.get("id") else {
-            return Err(invalid("block state is missing id"));
+        // 1.21.11's `Name`/`Properties`, or 26.1's `id`/`properties` (prepared data, tests).
+        let Some(Tag::String(name)) = tag.get("Name").or_else(|| tag.get("id")) else {
+            return Err(invalid("block state is missing Name"));
         };
         let mut properties = BTreeMap::new();
-        if let Some(tag) = tag.get("properties") {
+        if let Some(tag) = tag.get("Properties").or_else(|| tag.get("properties")) {
             let Tag::Compound(map) = tag else {
                 return Err(invalid("block properties are not a compound"));
             };

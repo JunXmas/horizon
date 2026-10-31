@@ -58,8 +58,10 @@ impl<'de> Deserialize<'de> for State {
         enum Shape {
             Name(String),
             Full {
+                // 1.21.11 `Name`/`Properties`; 26.1 `id`/`properties`.
+                #[serde(alias = "Name")]
                 id: String,
-                #[serde(default)]
+                #[serde(default, alias = "Properties")]
                 properties: BTreeMap<String, String>,
             },
         }

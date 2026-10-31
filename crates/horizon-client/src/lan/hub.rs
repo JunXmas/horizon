@@ -617,13 +617,8 @@ impl Hub {
             g.sender.send(body.clone());
         }
     }
-    /// `DedicatedServer.sendLowDiskSpaceWarning`: the players with
-    /// `PermissionLevel.ADMINS` (3) or more get `ClientboundLowDiskSpaceWarningPacket`.
+    /// 1.21.11 has no low disk space warning packet (26.1 added it): nothing to send.
     pub fn send_low_disk_space_warning(&self) {
-        let body = C::LowDiskSpaceWarning(horizon_protocol::packets::Empty).encode();
-        for g in self.guests.iter().filter(|g| g.placed && g.permission >= 3) {
-            g.sender.send(body.clone());
-        }
     }
     pub fn broadcast_except(&self, conn: u32, packet: &C) {
         let body = packet.encode();
@@ -960,12 +955,9 @@ impl Hub {
         self.send_inventory(i);
     }
 
-    /// `ServerPlayer.sendPostEffects`: the player's `/posteffect` chains.
+    /// 1.21.11 has no post effects packet (26.1 added `/posteffect`): nothing to send.
     pub fn send_post_effects(&mut self, i: usize) {
-        let g = &mut self.guests[i];
-        g.post_effects_dirty = false;
-        let effects = g.post_effects.clone();
-        g.send(&C::PostEffects(play::PostEffects { effects }));
+        self.guests[i].post_effects_dirty = false;
     }
 
     /// ClientboundUpdateMobEffectPacket for one of the guest's effects.
@@ -2277,11 +2269,11 @@ impl Hub {
         g.sleeping = false;
         g.sleep_timer = 100;
         let (id, at) = (g.entity_id, g.position);
-        // ClientboundAnimatePacket.WAKE_UP.
+        // ClientboundAnimatePacket.WAKE_UP (2 on 1.21.11).
         self.broadcast_near(
             at,
             128.0,
-            &C::Animate(play::Animate { id, action: 0 }),
+            &C::Animate(play::Animate { id, action: 2 }),
             None,
         );
     }
@@ -2611,9 +2603,7 @@ impl Hub {
                 S::PlayerAction(_)
                 | S::UseItemOn(_)
                 | S::UseItem(_)
-                | S::Attack(_)
                 | S::Interact(_)
-                | S::SpectatorAction(_)
                 | S::PlayerCommand(_)
                     if !self.guests[i].client_loaded() => {}
                 // handleAcceptTeleportPacket.
@@ -3257,10 +3247,7 @@ impl Hub {
             total: xp.2,
         }));
         g.sent_xp = Some(xp);
-        // ServerPlayer.sendPostEffects.
-        let list = g.post_effects.clone();
         g.post_effects_dirty = false;
-        g.send(&C::PostEffects(play::PostEffects { effects: list }));
         self.send_level_info(i, ctx, true);
         self.send_permission_level(i);
         // ServerLevel.addRespawnedPlayer: the chunk tracking starts again at the player.
@@ -3371,10 +3358,7 @@ impl Hub {
         }));
         self.send_active_effects(i);
         let g = &mut self.guests[i];
-        // ServerPlayer.sendPostEffects.
-        let list = g.post_effects.clone();
         g.post_effects_dirty = false;
-        g.send(&C::PostEffects(play::PostEffects { effects: list }));
         // lastSentExp, lastSentHealth and lastSentFood; the client's new
         // player starts with the default air and no absorption.
         g.sent_health = None;

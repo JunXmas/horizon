@@ -190,7 +190,12 @@ impl Game<'_> {
         if self.swing.start_if_able(hand, animation, duration) {
             self.swings_started += 1;
         }
-    }
+        // LocalPlayer.swing (1.21.11): every swing of this client's player is told to the
+        // server, which shows it to the players around.
+        self.send(horizon_protocol::packets::play::Serverbound::Swing(
+            horizon_protocol::packets::play::Swing { hand: i32::from(hand == Hand::Off) },
+        ));
+        }
     /// `swing(hand)` for the hand that acts, with the default animation.
     pub(super) fn swing_arm(&mut self) {
         self.swing_hand(self.hand, SwingAnimation::DEFAULT);
