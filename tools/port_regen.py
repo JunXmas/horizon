@@ -265,7 +265,7 @@ GENERATORS = [
                                           store / "sources" / "client"]),
     ("block_state_data", ["crates/horizon-world/src/datafix/block_state_data.txt"],
      lambda root, version, store, build: [python(), "tools/gen_block_state_data.py",
-                                          store / "sources/server" / f"{SOURCES[1][1]}.java"]),
+                                          store / "sources/server" / f"{SOURCES[1][1][0]}.java"]),
     ("lan_command_order", ["crates/horizon-client/src/lan/command_order.rs"],
      lambda root, version, store, build: [python(), "tools/generate_lan_command_order.py"]),
     ("command_suggestions", ["crates/horizon-client/src/lan/command_suggestions.rs"], gen_suggestions),
