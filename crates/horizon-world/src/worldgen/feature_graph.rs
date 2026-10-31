@@ -85,6 +85,14 @@ pub enum FeatureDefinition {
     ProjectedPatchySquare(Box<super::projected::ProjectedPatchySquareFeature>),
     SteppedColumnCluster(Box<super::projected::SteppedColumnClusterFeature>),
     FallenTree(Box<super::tree::FallenTreeFeature>),
+    /// RandomPatchFeature (1.21.11's random_patch, flower and no_bonemeal_flower; 26.1 writes
+    /// them as placement modifiers): `tries` placements of `feature` around the origin.
+    RandomPatch {
+        tries: i32,
+        xz_spread: i32,
+        y_spread: i32,
+        feature: Box<PlacedFeatureDefinition>,
+    },
     NoOp,
     Template(Box<super::structure::features::TemplateFeature>),
     Fossil(Box<super::structure::features::FossilFeature>),
@@ -314,6 +322,29 @@ impl FeatureDefinition {
         )?)?;
         match kind.as_str() {
             "minecraft:no_op" => Ok(Self::NoOp),
+            "minecraft:random_patch" | "minecraft:flower" | "minecraft:no_bonemeal_flower" => {
+                let int = |name: &'static str, default: i32| -> Result<i32, DecodeError> {
+                    object.get(name).map_or(Ok(default), |raw| {
+                        number_text(raw)?.parse().map_err(|_| DecodeError::Field(name))
+                    })
+                };
+                let (tries, xz_spread, y_spread) = (int("tries", 128)?, int("xz_spread", 7)?, int("y_spread", 3)?);
+                if tries <= 0 || !(0..=16).contains(&xz_spread) || !(0..=16).contains(&y_spread) {
+                    return Err(DecodeError::Field("random patch"));
+                }
+                Ok(Self::RandomPatch {
+                    tries,
+                    xz_spread,
+                    y_spread,
+                    feature: Box::new(PlacedFeatureDefinition::decode(
+                        required(&object, "feature")?.get(),
+                        depth + 1,
+                        remaining,
+                        empty_tags,
+                        blocks,
+                    )?),
+                })
+            }
             "minecraft:template" => super::structure::features::TemplateFeature::decode(
                 json,
                 blocks.ok_or(DecodeError::Field("template bindings"))?,
@@ -1070,6 +1101,21 @@ impl FeatureDefinition {
                 Some(feature) => feature.place_in(&mut placer, world, random, origin, run),
                 None => Ok(false),
             },
+            Self::RandomPatch { tries, xz_spread, y_spread, feature } => {
+                let (xz, y) = (xz_spread + 1, y_spread + 1);
+                let mut placed = 0;
+                for _ in 0..*tries {
+                    // setWithOffset(origin, nextInt(xz) - nextInt(xz), nextInt(y) - nextInt(y), ...), in that order.
+                    let dx = random.next_int_bound(xz)? - random.next_int_bound(xz)?;
+                    let dy = random.next_int_bound(y)? - random.next_int_bound(y)?;
+                    let dz = random.next_int_bound(xz)? - random.next_int_bound(xz)?;
+                    let at = [origin[0] + dx, origin[1] + dy, origin[2] + dz];
+                    if feature.place_in(&mut placer, world, random, at, run)? {
+                        placed += 1;
+                    }
+                }
+                Ok(placed > 0)
+            }
             Self::Sequence(features) => {
                 for feature in features {
                     if !feature.place_in(&mut placer, world, random, origin, run)? {

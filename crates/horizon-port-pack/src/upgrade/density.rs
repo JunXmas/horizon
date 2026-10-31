@@ -196,6 +196,31 @@ impl<'a> Context<'a> {
                 json!({"type": format!("minecraft:{t}"), "noise": noise_holder(&arg("argument"), report)})
             }
             "end_islands" => json!({"type": "minecraft:end_outer_islands"}),
+            // WeirdScaledSampler: rarity(input) * |noise(pos / rarity)|, rarity a step function of
+            // the input (NoiseRouterData.QuantizedSpaghettiRarity). rarity > 0, so this is
+            // |interval_select(input, rarity * noise scaled by 1 / rarity)|, as 26.3 writes it.
+            "weird_scaled_sampler" => {
+                let (thresholds, rarities): (&[f64], &[f64]) = match arg("rarity_value_mapper").as_str() {
+                    Some("type_1") => (&[-0.5, 0.0, 0.5], &[0.75, 1.0, 1.5, 2.0]),
+                    Some("type_2") => (&[-0.75, -0.5, 0.5, 0.75], &[0.5, 0.75, 1.0, 2.0, 3.0]),
+                    _ => {
+                        report.unknown("density function weird_scaled_sampler rarity");
+                        return v.clone();
+                    }
+                };
+                let noise = noise_holder(&arg("noise"), report);
+                let functions: Vec<Value> = rarities
+                    .iter()
+                    .map(|r| {
+                        let scale = 1.0 / r;
+                        json!({"type": "minecraft:mul", "left": {"type": "minecraft:noise", "noise": noise,
+                            "xz_scale": scale, "y_scale": scale}, "right": r})
+                    })
+                    .collect();
+                let input = self.density(&arg("input"), report);
+                json!({"type": "minecraft:abs", "input": {"type": "minecraft:interval_select",
+                    "input": input, "thresholds": thresholds, "functions": functions}})
+            }
             "constant" => arg("argument"),
             "clamp" | "range_choice" | "find_top_surface" | "interval_select" => {
                 let mut n = o.clone();

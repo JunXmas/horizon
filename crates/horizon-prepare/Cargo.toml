@@ -6,6 +6,8 @@ license = "MIT"
 description = "Prepares Horizon's resources from the player's own Minecraft: imports and checks the pinned jars, runs the vanilla exporters, writes the resource folder"
 
 [dependencies]
+# 1.21.11: its world generation data rewritten in the 26.x formats the generator reads.
+horizon-port-pack = { path = "../horizon-port-pack" }
 crc32fast = "1"
 regex = { version = "1", default-features = false, features = ["std", "unicode-perl"] }
 sha1 = "0.10"

@@ -1329,6 +1329,7 @@ name = "horizon-prepare"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
+ "horizon-port-pack",
  "libc",
  "regex",
  "sha1",

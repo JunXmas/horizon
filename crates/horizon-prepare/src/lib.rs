@@ -1054,6 +1054,40 @@ fn install_datagen_reports(root: &Path, reports: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The jar's world generation data (`data/minecraft/worldgen`, `tags/worldgen`, `dimension_type`),
+/// upgraded to 26.x's formats.
+fn upgraded_worldgen(
+    server: &mut zip::ZipArchive<fs::File>,
+    log: Log,
+) -> Result<std::collections::BTreeMap<String, Vec<u8>>, String> {
+    let mut files = std::collections::BTreeMap::new();
+    for name in zip_names(server) {
+        let wanted = ["data/minecraft/worldgen/", "data/minecraft/tags/worldgen/", "data/minecraft/dimension_type/"]
+            .iter()
+            .any(|p| name.starts_with(p));
+        if wanted && name.ends_with(".json") {
+            files.insert(name.clone(), zip_bytes(server, &name)?);
+        }
+    }
+    let (out, report) = horizon_port_pack::upgrade::upgrade_pack(&files);
+    for line in report.lines() {
+        log(&format!("World generation upgrade: {line}"));
+    }
+    Ok(out)
+}
+
+/// One bundle's files from the upgraded data, keyed `minecraft:<path>` like `json_resources`.
+fn upgraded_resources(files: &std::collections::BTreeMap<String, Vec<u8>>, path: &str) -> Value {
+    let prefix = format!("data/minecraft/{path}/");
+    let mut resources = Value::Object(Vec::new());
+    for (name, bytes) in files {
+        if let Some(rest) = name.strip_prefix(&prefix).and_then(|r| r.strip_suffix(".json")) {
+            resources.insert(&format!("minecraft:{rest}"), Value::Str(String::from_utf8_lossy(bytes).into_owned()));
+        }
+    }
+    resources
+}
+
 /// 1.21.11: the 26.1 block tags Horizon reads (legacy_tags.rs), with `blocks_motion` and
 /// `blocks_motion_no_leaves` from vanilla's `blocksMotion()` (VanillaHeightmapOracle's export), as tag files.
 fn add_legacy_tags(tags: &mut Value, motion: &Value) -> Result<(), String> {
@@ -1135,30 +1169,28 @@ fn prepare_worldgen(run: &Run) -> Result<(), String> {
         }
     }
     let mut client = open_zip(&run.client)?;
+    // 1.21.11 and older: vanilla's world generation data upgraded to 26.x's formats by the
+    // data pack upgrader (horizon-port-pack), which spells 1.21.11's hardcoded parts as data.
+    let upgraded = if run.legacy { Some(upgraded_worldgen(&mut server, run.log)?) } else { None };
     for (name, path) in WORLDGEN_BUNDLES {
-        // 1.21.11 and older: features and carvers are `configured_*`, and rules, conditions, block state
-        // providers and feature tags have no registry of their own, so those bundles are empty.
-        let legacy = run.legacy;
-        let path = match path {
-            "worldgen/feature" if legacy => "worldgen/configured_feature",
-            "worldgen/carver" if legacy => "worldgen/configured_carver",
-            _ => path,
-        };
-        let inline_only = legacy
-            && matches!(
-                path,
-                "worldgen/material_rule" | "worldgen/material_condition" | "worldgen/block_state_provider" | "tags/worldgen/feature"
-            );
+        if let Some(files) = &upgraded {
+            let mut resources = upgraded_resources(files, path);
+            if path == "tags/block" {
+                resources = json_resources(&mut server, &format!("data/minecraft/{path}/"))?;
+                add_legacy_tags(&mut resources, &read_json(&root.join("legacy-motion-tags.json"))?)?;
+            }
+            write_text(
+                &out.join(format!("{name}.json")),
+                &pyjson::dumps(&resources, &pyjson::COMPACT),
+            )?;
+            continue;
+        }
         let prefix = format!("data/minecraft/{path}/");
         let resources = json_resources(&mut server, &prefix)?;
-        if (resources.as_object().is_none_or(<[_]>::is_empty) && !inline_only)
+        if resources.as_object().is_none_or(<[_]>::is_empty)
             || resources != json_resources(&mut client, &prefix)?
         {
             return Err(format!("Reference worldgen resources disagree: {path}"));
-        }
-        let mut resources = resources;
-        if legacy && path == "tags/block" {
-            add_legacy_tags(&mut resources, &read_json(&root.join("legacy-motion-tags.json"))?)?;
         }
         write_text(
             &out.join(format!("{name}.json")),
