@@ -5,16 +5,13 @@ use serde_json::{Map, Value, json};
 /// Feature types 26.3 dropped for compositions of other features; a pack
 /// using them needs vanilla's composition, which the upgrade does not
 /// write.
-const REPLACED_FEATURES: [&str; 11] = [
+const REPLACED_FEATURES: [&str; 8] = [
     "basalt_columns",
     "basalt_pillar",
     "coral_mushroom",
     "desert_well",
     "glowstone_blob",
-    "kelp",
     "nether_forest_vegetation",
-    "sea_pickle",
-    "seagrass",
     "twisting_vines",
     "weeping_vines",
 ];

@@ -34,6 +34,7 @@ pub mod end_spike;
 pub mod feature;
 pub mod feature_catalog;
 pub mod feature_graph;
+pub mod ocean_plants;
 pub mod feature_region;
 pub mod feature_sort;
 pub mod fluid_predicate;

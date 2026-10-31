@@ -85,6 +85,8 @@ pub enum FeatureDefinition {
     ProjectedPatchySquare(Box<super::projected::ProjectedPatchySquareFeature>),
     SteppedColumnCluster(Box<super::projected::SteppedColumnClusterFeature>),
     FallenTree(Box<super::tree::FallenTreeFeature>),
+    /// 1.21.11's seagrass, kelp and sea_pickle features (ocean_plants.rs).
+    OceanPlant(super::ocean_plants::OceanPlant, std::sync::Arc<super::ocean_plants::OceanBlocks>),
     /// RandomPatchFeature (1.21.11's random_patch, flower and no_bonemeal_flower; 26.1 writes
     /// them as placement modifiers): `tries` placements of `feature` around the origin.
     RandomPatch {
@@ -112,6 +114,7 @@ pub enum FeatureExecutionError<E> {
     Provider(super::state_provider::StateProviderError<E>),
     BlockColumn(super::block_column::BlockColumnError<E>),
     BlockPile(super::block_pile::BlockPileError<E>),
+    OceanPlant(super::ocean_plants::OceanPlantError<E>),
     Disk(super::disk::DiskError<E>),
     BlockBlob(super::block_blob::BlockBlobError<E>),
     SnowAndFreeze(super::snow_freeze::SnowAndFreezeError<E>),
@@ -141,6 +144,7 @@ impl<E: std::fmt::Display> std::fmt::Display for FeatureExecutionError<E> {
             Self::Provider(e) => e.fmt(f),
             Self::BlockColumn(e) => e.fmt(f),
             Self::BlockPile(e) => e.fmt(f),
+            Self::OceanPlant(e) => e.fmt(f),
             Self::Disk(e) => e.fmt(f),
             Self::BlockBlob(e) => e.fmt(f),
             Self::SnowAndFreeze(e) => e.fmt(f),
@@ -322,6 +326,23 @@ impl FeatureDefinition {
         )?)?;
         match kind.as_str() {
             "minecraft:no_op" => Ok(Self::NoOp),
+            "minecraft:seagrass" | "minecraft:kelp" | "minecraft:sea_pickle" => {
+                let registry = blocks.ok_or(DecodeError::Field("ocean plant bindings"))?.registry();
+                let plant = match kind.as_str() {
+                    "minecraft:seagrass" => super::ocean_plants::OceanPlant::Seagrass {
+                        probability: number_text(required(&object, "probability")?)?
+                            .parse()
+                            .map_err(|_| DecodeError::Field("probability"))?,
+                    },
+                    "minecraft:kelp" => super::ocean_plants::OceanPlant::Kelp,
+                    _ => super::ocean_plants::OceanPlant::SeaPickle {
+                        count: super::value_provider::IntProvider::decode(required(&object, "count")?, depth + 1, remaining)?,
+                    },
+                };
+                let ocean = super::ocean_plants::OceanBlocks::new(registry)
+                    .map_err(|e| DecodeError::Registry(e.to_string()))?;
+                Ok(Self::OceanPlant(plant, std::sync::Arc::new(ocean)))
+            }
             "minecraft:random_patch" | "minecraft:flower" | "minecraft:no_bonemeal_flower" => {
                 let int = |name: &'static str, default: i32| -> Result<i32, DecodeError> {
                     object.get(name).map_or(Ok(default), |raw| {
@@ -1101,6 +1122,9 @@ impl FeatureDefinition {
                 Some(feature) => feature.place_in(&mut placer, world, random, origin, run),
                 None => Ok(false),
             },
+            Self::OceanPlant(plant, ocean) => plant
+                .place(ocean, world, random, origin)
+                .map_err(FeatureExecutionError::OceanPlant),
             Self::RandomPatch { tries, xz_spread, y_spread, feature } => {
                 let (xz, y) = (xz_spread + 1, y_spread + 1);
                 let mut placed = 0;
