@@ -11,7 +11,8 @@ It also checks the Prometheus text, and that a call without the token is refused
 not run; then reads the settings and changes the difficulty live, and backs up, downloads and deletes a backup.
 The API listens on the address and with the token server.toml's [api] fixes, as a moderation bot's would.
 An event stream (server-sent events) opened before the bots join must see them join, Kim0's chat (sent as a raw
-chat packet), Lou0's death, the kick and the leaves, typed, with the same events polled as JSON.
+chat packet), Lou0's death, the kick and the leaves, typed, with the same events polled as JSON. Last,
+`horizon-server console` attaches through a pipe, runs two commands and shows what they log.
 
 Everything runs in a fresh temporary folder with fresh HORIZON_HOME and XDG folders and no audio. Logs go
 to --out. Build first:
@@ -220,6 +221,17 @@ def scenario(bins, folder, server, port):
               f'the download is the zip ({len(data)} bytes)')
         api('DELETE', f'/api/v1/backups?name={name}')
         check(not (folder / 'backups' / name).exists(), 'the backup is deleted')
+
+        console = subprocess.Popen([str(bins / f'horizon-server{EXE}'), '--dir', str(folder), 'console'],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   text=True, env=lab.game_env())
+        console.stdin.write('say hello from the console\nlist\n')
+        console.stdin.flush()
+        time.sleep(3)  # the lines come back through the event stream
+        out, _ = console.communicate('', timeout=60)
+        check(console.returncode == 0 and 'Attached' in out and 'Detached' in out, f'console attaches and detaches ({out!r})')
+        check('[Server] hello from the console' in out and 'There are 0 of a max of 20 players online' in out,
+              f'console commands run and their lines show ({out[-600:]!r})')
     finally:
         for b in bots:
             b.kill()
