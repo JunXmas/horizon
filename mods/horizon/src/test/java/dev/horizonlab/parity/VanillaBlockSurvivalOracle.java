@@ -53,9 +53,9 @@ public final class VanillaBlockSurvivalOracle {
    for(var block:BuiltInRegistries.BLOCK){
     String name=BuiltInRegistries.BLOCK.getKey(block).toString();
     Class<?> type=declaring(block.getClass(),"canSurvive",BlockState.class,LevelReader.class,BlockPos.class);
-    definitions.addProperty(name,type.getSimpleName());
+    definitions.addProperty(name,LegacyNames.name(type));
     type=declaring(block.getClass(),"mayPlaceOn",BlockState.class,BlockGetter.class,BlockPos.class);
-    if(type!=null)placement.addProperty(name,type.getSimpleName());
+    if(type!=null)placement.addProperty(name,LegacyNames.name(type));
     var fields=new JsonObject();
     for(Class<?> c=block.getClass();c!=null;c=c.getSuperclass())for(var field:c.getDeclaredFields())if(field.getType().equals(net.minecraft.tags.TagKey.class)&&!Modifier.isStatic(field.getModifiers())) {
      field.setAccessible(true);var tag=(net.minecraft.tags.TagKey<?>)field.get(block);if(tag!=null)fields.addProperty(field.getName(),tag.location().toString());

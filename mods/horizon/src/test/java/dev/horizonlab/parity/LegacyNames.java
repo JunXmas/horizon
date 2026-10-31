@@ -1,0 +1,22 @@
+package dev.horizonlab.parity;
+
+import java.util.Map;
+
+/** 1.21.11 block classes under the names 26.1 gave them, so exporters write the names Horizon reads. */
+final class LegacyNames {
+    private static final Map<String, String> RENAMED = Map.of(
+        "FarmBlock", "FarmlandBlock",
+        "WaterlilyBlock", "LilyPadBlock",
+        "FungusBlock", "NetherFungusBlock",
+        "RootsBlock", "NetherRootsBlock",
+        "DirtPathBlock", "PathBlock",
+        "RedStoneWireBlock", "RedstoneWireBlock",
+        "SnowyDirtBlock", "SnowyBlock",
+        "SpreadingSnowyDirtBlock", "SpreadingSnowyBlock");
+
+    static String name(Class<?> type) {
+        return RENAMED.getOrDefault(type.getSimpleName(), type.getSimpleName());
+    }
+
+    private LegacyNames() {}
+}

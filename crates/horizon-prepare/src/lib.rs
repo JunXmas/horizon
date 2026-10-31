@@ -14,6 +14,7 @@ pub mod artifacts;
 pub mod exporters;
 mod files;
 mod inventory;
+mod legacy_tags;
 pub mod java;
 pub mod pyjson;
 mod sounds;
@@ -576,9 +577,12 @@ fn steps(
     }
 
     let block_tags = "data/minecraft/tags/block/";
-    let tags = json_resources(&mut open_zip(&run.server)?, block_tags)?;
+    let mut tags = json_resources(&mut open_zip(&run.server)?, block_tags)?;
     if tags != json_resources(&mut open_zip(&run.client)?, block_tags)? {
         return Err("Reference block tags disagree".into());
+    }
+    if run.legacy {
+        add_legacy_tags(&mut tags, &read_json(&root.join("legacy-motion-tags.json"))?)?;
     }
     write_json(&root.join("block-tags.json"), &tags)?;
 
@@ -1046,6 +1050,23 @@ fn install_datagen_reports(root: &Path, reports: &Path) -> Result<(), String> {
     mkdir(&biome_parameters)?;
     for file in json_files(&reports.join("biome_parameters/minecraft"))? {
         copy(&file, &biome_parameters.join(file.file_name().unwrap()))?;
+    }
+    Ok(())
+}
+
+/// 1.21.11: the 26.1 block tags Horizon reads (legacy_tags.rs), with `blocks_motion` and
+/// `blocks_motion_no_leaves` from vanilla's `blocksMotion()` (VanillaHeightmapOracle's export), as tag files.
+fn add_legacy_tags(tags: &mut Value, motion: &Value) -> Result<(), String> {
+    for (name, entries) in legacy_tags::LEGACY_BLOCK_TAGS {
+        let values: Vec<Value> = match motion.get(name).and_then(Value::as_array) {
+            Some(blocks) if entries.is_empty() => blocks.to_vec(),
+            _ => entries.iter().map(|e| Value::str(*e)).collect(),
+        };
+        if tags.get(name).is_some() {
+            return Err(format!("{name} is a real 1.21.11 tag; drop it from legacy_tags.rs"));
+        }
+        let file = Value::Object(vec![("values".into(), Value::Array(values))]);
+        tags.insert(name, Value::Str(pyjson::dumps(&file, &pyjson::DEFAULT)));
     }
     Ok(())
 }

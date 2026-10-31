@@ -282,7 +282,7 @@ public final class VanillaCommandParseOracle {
     static void exportRegistries(Path out, RegistryAccess access, HolderLookup.Provider lookup, net.minecraft.server.packs.repository.PackRepository repo, MultiPackResourceManager resources, net.minecraft.server.ReloadableServerResources managers) throws Exception {
         JsonObject o = new JsonObject();
         Set<String> learnable = new TreeSet<>();
-        lookup.lookupOrThrow(Registries.RECIPE).listElements().filter(h -> !h.value().isSpecial()).forEach(h -> learnable.add(h.key().identifier().toString()));
+        managers.getRecipeManager().getRecipes().stream().filter(h -> !h.value().isSpecial()).forEach(h -> learnable.add(h.id().identifier().toString()));
         JsonArray learnableArr = new JsonArray();
         learnable.forEach(learnableArr::add);
         o.add("learnable_recipes", learnableArr);

@@ -122,11 +122,21 @@ public final class VanillaHeightmapOracle {
             for(String read:chunk.reads)out.println(read);chunk.reads.clear();
         }
     }
+    /** 1.21.11 decides blocking motion in code (BlockStateBase.blocksMotion, Heightmap's LeavesBlock check)
+        where 26.1 has #blocks_motion and #blocks_motion_no_leaves: the blocks whose default state blocks motion. */
+    static Map<String,List<String>> motionTags() {
+        var all=new ArrayList<String>();var noLeaves=new ArrayList<String>();
+        for(var block:BuiltInRegistries.BLOCK)if(block.defaultBlockState().blocksMotion()){
+            String name=BuiltInRegistries.BLOCK.getKey(block).toString();all.add(name);if(!(block instanceof LeavesBlock))noLeaves.add(name);
+        }
+        return Map.of("minecraft:blocks_motion",all,"minecraft:blocks_motion_no_leaves",noLeaves);
+    }
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();Bootstrap.bootStrap();
         Path directory=Path.of(args[1]);
         if(args[0].equals("export")) {
-            Files.writeString(directory,new Gson().toJson(facts()),StandardCharsets.UTF_8);return;
+            Files.writeString(directory,new Gson().toJson(facts()),StandardCharsets.UTF_8);
+            Files.writeString(directory.resolveSibling("legacy-motion-tags.json"),new Gson().toJson(motionTags()),StandardCharsets.UTF_8);return;
         }
         Holder<Biome> biome=Holder.Reference.createStandAlone(new HolderOwner<Biome>(){},Biomes.PLAINS);
         var ids=new IdMapper<Holder<Biome>>();ids.add(biome);

@@ -126,7 +126,7 @@ public final class VanillaBlockBehaviourExporter {
     private static JsonArray chain(Class<?> c, Class<?> top) {
         var result = new JsonArray();
         for (; c != null && c != top; c = c.getSuperclass()) {
-            result.add(c.getSimpleName());
+            result.add(LegacyNames.name(c));
         }
         return result;
     }
@@ -140,7 +140,7 @@ public final class VanillaBlockBehaviourExporter {
             var interfaces = new JsonArray();
             for (Class<?> c = block.getClass(); c != null; c = c.getSuperclass()) {
                 for (Class<?> i : c.getInterfaces()) {
-                    interfaces.add(i.getSimpleName());
+                    interfaces.add(LegacyNames.name(i));
                 }
             }
             o.add("interfaces", interfaces);

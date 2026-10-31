@@ -134,10 +134,19 @@ pub fn bind_definitions(
             } else {
                 "supportBlocks"
             };
+            // 1.21.11 hardcodes these supports in mayPlaceOn (no TagKey field): use the matching
+            // 26.1 tag, which legacy_tags.rs defines for it.
+            let legacy = match method {
+                "AttachedStemBlock" | "StemBlock" => Some("minecraft:supports_stem_crops"),
+                "NetherFungusBlock" => Some("minecraft:supports_warped_fungus"),
+                "NetherRootsBlock" => Some("minecraft:supports_warped_roots"),
+                _ => None,
+            };
             let tag = support_tags
                 .get(name)
                 .and_then(|t| t.get(field))
                 .and_then(Value::as_str)
+                .or(legacy)
                 .ok_or_else(|| format!("No {field} support tag for {name}"))?;
             definitions.insert(name, Value::Str(format!("TagBelow:{tag}")));
         }
