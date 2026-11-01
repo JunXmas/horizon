@@ -909,7 +909,10 @@ fn network_stack(
             let mut w = horizon_protocol::buf::Writer::new();
             w.varint(size);
             for slot in 0..size {
-                let stack = slots.iter().find(|(at, _)| *at == slot).map(|(_, s)| s.clone());
+                let stack = slots
+                    .iter()
+                    .find(|(at, _)| *at == slot)
+                    .map(|(_, s)| s.clone());
                 <horizon_protocol::item::Slot as horizon_protocol::buf::Codec<Option<Stack>>>::write(
                     &stack, &mut w,
                 );

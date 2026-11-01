@@ -4660,7 +4660,9 @@ impl Game<'_> {
         // 1.21.11's handleMovePlayer: the id alone, then where the player now
         // is (a PosRot, onGround and horizontalCollision false) — sent apart
         // from LocalPlayer.sendPosition, whose baseline it leaves alone.
-        self.send(S::AcceptTeleportation(play::AcceptTeleportation { id: p.teleport }));
+        self.send(S::AcceptTeleportation(play::AcceptTeleportation {
+            id: p.teleport,
+        }));
         let at = self.player.as_ref().map_or(position, |pl| pl.position);
         self.send(S::MovePlayerPosRot(play::MovePlayerPosRot {
             x: at.x,
@@ -6070,13 +6072,18 @@ impl Game<'_> {
             let location = hit.location.map(|v| v as f32);
             self.send(S::Interact(play::Interact {
                 id: hit.id,
-                action: play::InteractAction::InteractAt { hand: hand_id(hand), location },
+                action: play::InteractAction::InteractAt {
+                    hand: hand_id(hand),
+                    location,
+                },
                 secondary: sneaking,
             }));
             if !self.armor_stands.iter().any(|a| a.id as i32 == hit.id) {
                 self.send(S::Interact(play::Interact {
                     id: hit.id,
-                    action: play::InteractAction::Interact { hand: hand_id(hand) },
+                    action: play::InteractAction::Interact {
+                        hand: hand_id(hand),
+                    },
                     secondary: sneaking,
                 }));
             }
@@ -6101,12 +6108,17 @@ impl Game<'_> {
             // interactAt passes for a mob, then interact (1.21.11).
             self.send(S::Interact(play::Interact {
                 id,
-                action: play::InteractAction::InteractAt { hand: hand_id(hand), location: [0.0, 1.0, 0.0] },
+                action: play::InteractAction::InteractAt {
+                    hand: hand_id(hand),
+                    location: [0.0, 1.0, 0.0],
+                },
                 secondary: sneaking,
             }));
             self.send(S::Interact(play::Interact {
                 id,
-                action: play::InteractAction::Interact { hand: hand_id(hand) },
+                action: play::InteractAction::Interact {
+                    hand: hand_id(hand),
+                },
                 secondary: sneaking,
             }));
             // Player.interactOn: another player passes, and so does a mob
@@ -7167,13 +7179,17 @@ impl Game<'_> {
         }
         self.swing_arm();
         instant
-        }
+    }
 
-        /// `MultiPlayerGameMode.attack` (1.21.11): `ServerboundInteractPacket.createAttackPacket`.
-        fn send_attack(&mut self, id: i32) {
-            let secondary = self.keys.contains(&KeyCode::ShiftLeft);
-            self.send(S::Interact(play::Interact { id, action: play::InteractAction::Attack, secondary }));
-        }
+    /// `MultiPlayerGameMode.attack` (1.21.11): `ServerboundInteractPacket.createAttackPacket`.
+    fn send_attack(&mut self, id: i32) {
+        let secondary = self.keys.contains(&KeyCode::ShiftLeft);
+        self.send(S::Interact(play::Interact {
+            id,
+            action: play::InteractAction::Attack,
+            secondary,
+        }));
+    }
 
     /// `MultiPlayerGameMode.attack` runs `Player.attack` on this client too.
     /// For a mob `hurtOrSimulate` fails here (`Entity.hurtClient`), so the

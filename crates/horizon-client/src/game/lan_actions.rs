@@ -1500,7 +1500,9 @@ impl Game<'_> {
                 // Only an armor stand acts on INTERACT_AT (Entity.interactAt passes); the client
                 // then sends INTERACT, which does the rest.
                 let (hand, location) = match p.action {
-                    InteractAction::InteractAt { hand, location } if self.armor_stands.iter().any(|a| a.id as i32 == p.id) => {
+                    InteractAction::InteractAt { hand, location }
+                        if self.armor_stands.iter().any(|a| a.id as i32 == p.id) =>
+                    {
                         (hand, location.map(f64::from))
                     }
                     InteractAction::Interact { hand } => (hand, [0.0, 1.0, 0.0]),
@@ -3987,7 +3989,10 @@ impl Game<'_> {
 /// ClientboundAnimatePacket (1.21.11): SWING_MAIN_HAND (0) or SWING_OFF_HAND (3); the
 /// animation is always the default one.
 fn swing_packet(id: i32, hand: Hand, _animation: SwingAnimation) -> C {
-    C::Animate(play::Animate { id, action: if hand == Hand::Off { 3 } else { 0 } })
+    C::Animate(play::Animate {
+        id,
+        action: if hand == Hand::Off { 3 } else { 0 },
+    })
 }
 
 /// The block columns `Entity.isInWall` looks at: `AABB.ofSize` around the

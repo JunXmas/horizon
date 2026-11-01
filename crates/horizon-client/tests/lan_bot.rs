@@ -581,7 +581,10 @@ fn two_moves_in_one_client_tick_are_not_a_kick() {
         ));
     }
     s.tick(&[]);
-    assert_eq!(s.hub.guests[0].left_reason, "", "the second move kicked the player");
+    assert_eq!(
+        s.hub.guests[0].left_reason, "",
+        "the second move kicked the player"
+    );
 }
 
 /// The first login packet a client named `name` gets after its hello.

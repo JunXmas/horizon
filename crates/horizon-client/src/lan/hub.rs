@@ -615,8 +615,7 @@ impl Hub {
         }
     }
     /// 1.21.11 has no low disk space warning packet (26.1 added it): nothing to send.
-    pub fn send_low_disk_space_warning(&self) {
-    }
+    pub fn send_low_disk_space_warning(&self) {}
     pub fn broadcast_except(&self, conn: u32, packet: &C) {
         let body = packet.encode();
         for g in self.guests.iter().filter(|g| g.placed && g.conn != conn) {

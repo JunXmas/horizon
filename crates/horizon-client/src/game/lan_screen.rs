@@ -547,7 +547,9 @@ impl Game<'_> {
             // 1.21.11 has no game rule packet: the changes go as /gamerule commands.
             if self.ui.registries.permission >= 2 {
                 for (name, value) in changes {
-                    self.send(S::ChatCommand(play::ChatCommand { command: format!("gamerule {name} {value}") }));
+                    self.send(S::ChatCommand(play::ChatCommand {
+                        command: format!("gamerule {name} {value}"),
+                    }));
                 }
             }
             return;

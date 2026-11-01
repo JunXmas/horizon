@@ -654,7 +654,8 @@ impl PlayerMotion {
             _ => None,
         };
         let Some(key) = self.attributes.key(name) else {
-            return legacy_default.ok_or_else(|| format!("missing movement attribute {name}").into());
+            return legacy_default
+                .ok_or_else(|| format!("missing movement attribute {name}").into());
         };
         Ok(self
             .attributes

@@ -201,7 +201,10 @@ impl Hub {
             at,
             128.0,
             // 1.21.11: ClientboundAnimatePacket SWING_MAIN_HAND (0) or SWING_OFF_HAND (3).
-            &C::Animate(play::Animate { id, action: if hand == 1 { 3 } else { 0 } }),
+            &C::Animate(play::Animate {
+                id,
+                action: if hand == 1 { 3 } else { 0 },
+            }),
             except,
         );
     }

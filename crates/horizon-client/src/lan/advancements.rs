@@ -692,11 +692,17 @@ mod tests {
             &mut Settings::default(),
         );
         let mut r = Reader::new(&first.update_advancements);
-        let p = <horizon_protocol::packets::play::UpdateAdvancements as horizon_protocol::buf::Codec<_>>::read(&mut r)
+        let p =
+            <horizon_protocol::packets::play::UpdateAdvancements as horizon_protocol::buf::Codec<
+                _,
+            >>::read(&mut r)
             .unwrap();
         assert_eq!(r.remaining(), 0);
         let display = p.added[0].display.as_ref().unwrap();
-        assert_eq!(display.icon, Stack::new(sync.id("minecraft:item", "minecraft:furnace").unwrap(), 1));
+        assert_eq!(
+            display.icon,
+            Stack::new(sync.id("minecraft:item", "minecraft:furnace").unwrap(), 1)
+        );
         assert_eq!((display.x, display.y), (0.0, 0.0));
         let _ = std::fs::remove_dir_all(&root);
     }

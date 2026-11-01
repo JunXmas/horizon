@@ -313,11 +313,7 @@ impl Game<'_> {
             particles.add_with(&options, at, v, p.override_limiter, p.always_show);
         };
         if p.count == 0 {
-            add(
-                &mut self.particles,
-                p.pos,
-                [s * d[0], s * d[1], s * d[2]],
-            );
+            add(&mut self.particles, p.pos, [s * d[0], s * d[1], s * d[2]]);
             return;
         }
         for _ in 0..p.count {

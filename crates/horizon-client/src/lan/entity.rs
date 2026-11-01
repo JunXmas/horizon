@@ -12,8 +12,8 @@ use horizon_protocol::{
     item::Stack,
     packets::play::{
         self, AddEntity, AttributeSnapshot, EntityPositionSync, MoveEntity, MoveEntityPos,
-        MoveEntityPosRot, MoveEntityRot, RotateHead, SetEntityData, SetEntityLink,
-        SetEntityMotion, SetEquipment, SetPassengers, UpdateAttributes,
+        MoveEntityPosRot, MoveEntityRot, RotateHead, SetEntityData, SetEntityLink, SetEntityMotion,
+        SetEquipment, SetPassengers, UpdateAttributes,
     },
 };
 
