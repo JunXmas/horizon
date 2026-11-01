@@ -195,7 +195,16 @@ impl<'a> Context<'a> {
             "shift_a" | "shift_b" | "shift" => {
                 json!({"type": format!("minecraft:{t}"), "noise": noise_holder(&arg("argument"), report)})
             }
-            "end_islands" => json!({"type": "minecraft:end_outer_islands"}),
+            // 1.21.11's EndIslandDensityFunction holds the center island too: max(the center,
+            // clamp(100 - dist(x/8, z/8) * 8, -100, 80), the outer islands) - 8, over 128, as 26.3's
+            // end/islands writes it.
+            "end_islands" => json!({"type": "minecraft:cache", "input": {"type": "minecraft:max",
+                "left": {"type": "minecraft:slice", "axis": "y", "coordinate": 0, "input": {"type": "minecraft:mul",
+                    "left": {"type": "minecraft:sub", "left": {"type": "minecraft:clamp", "input": {"type": "minecraft:sub",
+                        "left": 100.0, "right": {"type": "minecraft:distance_to_point", "metric": "euclidean", "point": [0, 0, 0]}},
+                        "max": 80.0, "min": -100.0}, "right": 8.0},
+                    "right": 0.0078125}},
+                "right": {"type": "minecraft:end_outer_islands"}}}),
             // WeirdScaledSampler: rarity(input) * |noise(pos / rarity)|, rarity a step function of
             // the input (NoiseRouterData.QuantizedSpaghettiRarity). rarity > 0, so this is
             // |interval_select(input, rarity * noise scaled by 1 / rarity)|, as 26.3 writes it.
