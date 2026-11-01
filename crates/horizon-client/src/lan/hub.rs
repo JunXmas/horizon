@@ -2752,11 +2752,9 @@ impl Hub {
             self.anticheat_moved(i, pos, rot, flags);
         }
         let g = &mut self.guests[i];
+        // 1.21.11 takes any number of moves a tick (receivedMovementThisTick only feeds
+        // handleClientTickEnd); 26.x kicks for a second one, which a 1.21.11 client sends after a teleport.
         if pos.is_some() {
-            if g.position_this_tick {
-                self.kick(conn, invalid_movement());
-                return;
-            }
             g.position_this_tick = true;
         }
         // handleMovePlayer: nothing moves before the client has loaded.

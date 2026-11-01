@@ -550,6 +550,40 @@ fn a_move_behind_a_dig_and_its_swing_waits_for_the_next_tick() {
     );
 }
 
+#[test]
+fn two_moves_in_one_client_tick_are_not_a_kick() {
+    // A 1.21.11 client answers a teleport with its position and its own move in one
+    // tick; only 26.x kicks for a second move before ClientTickEnd.
+    let Some(resources) = resources() else {
+        return;
+    };
+    let mut s = server(&resources);
+    let port = s.hub.lan.port;
+    let _bot = run(&mut s, move || connect(port, "Mover", true));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while s.hub.guests.is_empty() {
+        s.tick(&[]);
+        assert!(Instant::now() < deadline, "guest did not join");
+        thread::yield_now();
+    }
+    s.hub.guests[0].loaded = true;
+    s.hub.guests[0].load_timeout = 0;
+    let at = s.hub.guests[0].position;
+    for _ in 0..2 {
+        s.hub.guests[0].inbox.push_back((
+            S::MovePlayerPos(play::MovePlayerPos {
+                x: at[0],
+                y: at[1],
+                z: at[2],
+                flags: 1,
+            }),
+            0,
+        ));
+    }
+    s.tick(&[]);
+    assert_eq!(s.hub.guests[0].left_reason, "", "the second move kicked the player");
+}
+
 /// The first login packet a client named `name` gets after its hello.
 fn first_login_packet(mut c: Connection, port: u16, name: &str) -> login::Clientbound {
     c.send(
