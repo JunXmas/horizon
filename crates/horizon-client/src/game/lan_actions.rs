@@ -1178,7 +1178,7 @@ impl Game<'_> {
         let spectator = host.hub.guests[gi].spectator();
         match packet {
             S::PlayerAction(a) => match a.action {
-                0 => {
+                play::player_action::START_DESTROY_BLOCK => {
                     host.hub.ack(conn, a.sequence);
                     if spectator {
                         return;
@@ -1248,8 +1248,7 @@ impl Game<'_> {
                         play.digging = None;
                     }
                 }
-                1 => {}
-                3 => {
+                play::player_action::STOP_DESTROY_BLOCK => {
                     host.hub.ack(conn, a.sequence);
                     if !host.hub.guests[gi].may_reach_block(a.pos) {
                         // Too far (handleBlockBreakAction's "too far"): the
@@ -1262,7 +1261,7 @@ impl Game<'_> {
                     }
                     self.guest_stop_digging(host, conn, a.pos);
                 }
-                2 => {
+                play::player_action::ABORT_DESTROY_BLOCK => {
                     host.hub.ack(conn, a.sequence);
                     let play = host.play.entry(conn).or_default();
                     play.digging = None;
@@ -1288,14 +1287,16 @@ impl Game<'_> {
                         Some(conn),
                     );
                 }
-                4 | 5 => {
+                play::player_action::DROP_ALL_ITEMS | play::player_action::DROP_ITEM => {
                     if !spectator {
-                        self.as_guest(host, conn, |g| g.drop_held(a.action == 4));
+                        self.as_guest(host, conn, |g| {
+                            g.drop_held(a.action == play::player_action::DROP_ALL_ITEMS)
+                        });
                     }
                 }
                 // RELEASE_USE_ITEM: ServerPlayer.releaseUsingItem, with the
                 // hand of the item in use acting.
-                6 => {
+                play::player_action::RELEASE_USE_ITEM => {
                     self.as_guest(host, conn, |g| {
                         let Some(hand) = g.used_hand() else {
                             return;
@@ -1311,7 +1312,7 @@ impl Game<'_> {
                 }
                 // SWAP_ITEM_WITH_OFFHAND: the hands swap and the item in use stops
                 // (ServerGamePacketListenerImpl.handlePlayerAction), not for spectators.
-                7 if !spectator => {
+                play::player_action::SWAP_ITEM_WITH_OFFHAND if !spectator => {
                     let g = &mut host.hub.guests[gi];
                     let slot = g.selected;
                     std::mem::swap(&mut g.inventory[slot], &mut g.offhand);
@@ -1326,7 +1327,7 @@ impl Game<'_> {
                     });
                 }
                 // STAB: `PiercingWeapon.attack` of a left click with a spear.
-                8 if !spectator => self.guest_jab(host, conn),
+                play::player_action::STAB if !spectator => self.guest_jab(host, conn),
                 _ => {}
             },
             // handleSetCarriedItem: a new slot stops a main-hand use.

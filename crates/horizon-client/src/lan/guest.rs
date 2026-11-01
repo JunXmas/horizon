@@ -890,8 +890,8 @@ fn network_stack(
         }
         // `ItemContainerContents`: a shulker box's items, for its tooltip
         // (ClientContainerTooltip). The wire form is the slot count, then one
-        // optional template per slot, so the guest's stack lists the same items
-        // the host's holds.
+        // optional stack per slot (ItemStack.OPTIONAL_STREAM_CODEC, count 0 for
+        // an empty one), so the guest's stack lists the same items the host's holds.
         if !d.container.is_empty() {
             let slots: Vec<(i32, Stack)> = d
                 .container
@@ -909,14 +909,10 @@ fn network_stack(
             let mut w = horizon_protocol::buf::Writer::new();
             w.varint(size);
             for slot in 0..size {
-                let stack = slots.iter().find(|(at, _)| *at == slot).map(|(_, s)| s);
-                w.bool(stack.is_some());
-                if let Some(stack) = stack {
-                    <horizon_protocol::item::Template as horizon_protocol::buf::Codec<Stack>>::write(
-                        stack,
-                        &mut w,
-                    );
-                }
+                let stack = slots.iter().find(|(at, _)| *at == slot).map(|(_, s)| s.clone());
+                <horizon_protocol::item::Slot as horizon_protocol::buf::Codec<Option<Stack>>>::write(
+                    &stack, &mut w,
+                );
             }
             stack.added.push((
                 horizon_protocol::item::component::CONTAINER,
@@ -1178,11 +1174,10 @@ mod tests {
             panic!("the stack carried no container component");
         };
         // ItemContainerContents.STREAM_CODEC: the slot count, then one
-        // optional template per slot.
+        // optional stack per slot.
         let mut r = Reader::new(bytes);
         assert_eq!(r.count(256).unwrap(), 1);
-        assert!(r.bool().unwrap());
-        let template = horizon_protocol::item::Template::read(&mut r).unwrap();
+        let template = horizon_protocol::item::Slot::read(&mut r).unwrap().unwrap();
         assert_eq!(r.remaining(), 0);
         assert_eq!((template.item, template.count), (22, 2));
         assert!(matches!(

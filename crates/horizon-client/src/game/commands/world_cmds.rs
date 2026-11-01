@@ -663,9 +663,8 @@ impl Game<'_> {
                     always_show: false,
                     pos,
                     dist: delta.map(|d| d as f32),
-                    max_speed: [speed; 3],
+                    max_speed: speed,
                     count: count.max(0),
-                    randomization: 0,
                 })
             });
         let mut local = false;

@@ -28,14 +28,35 @@ packet!(
     /// GlobalPos: a dimension and a block position.
     GlobalPos { dimension: String => Ident, pos: [i32; 3] => Pos }
 );
+/// A GameType id as one byte (`writeByte(getId())`).
+pub struct GameTypeByte;
+impl Codec<i32> for GameTypeByte {
+    fn read(r: &mut Reader) -> Result<i32> {
+        Ok(i32::from(r.i8()?))
+    }
+    fn write(v: &i32, w: &mut Writer) {
+        w.i8(*v as i8)
+    }
+}
+/// `GameType.getNullableId` as one byte: -1 for none.
+pub struct NullableGameTypeByte;
+impl Codec<Option<i32>> for NullableGameTypeByte {
+    fn read(r: &mut Reader) -> Result<Option<i32>> {
+        let id = r.i8()?;
+        Ok((id != -1).then_some(i32::from(id)))
+    }
+    fn write(v: &Option<i32>, w: &mut Writer) {
+        w.i8(v.map_or(-1, |id| id as i8))
+    }
+}
 packet!(
     /// CommonPlayerSpawnInfo.
     SpawnInfo {
         dimension_type: i32 => VarInt,
         dimension: String => Ident,
         seed: i64 => Long,
-        game_type: i32 => VarInt,
-        previous_game_type: Option<i32> => OptVarInt,
+        game_type: i32 => GameTypeByte,
+        previous_game_type: Option<i32> => NullableGameTypeByte,
         debug: bool => Bool,
         flat: bool => Bool,
         last_death: Option<GlobalPos> => Opt<GlobalPos>,
@@ -75,13 +96,7 @@ packet!(BlockChangedAck { sequence: i32 => VarInt });
 packet!(BlockDestruction { id: i32 => VarInt, pos: [i32; 3] => Pos, progress: u8 => UByte });
 packet!(BlockEntityData { pos: [i32; 3] => Pos, kind: i32 => VarInt, tag: Tag => Nbt });
 packet!(BlockUpdate { pos: [i32; 3] => Pos, state: i32 => VarInt });
-// ClientboundAddTransientBlockPacket: a block the client shows for a moment
-// while its section mesh catches up (a falling block that landed).
-packet!(AddTransientBlock { pos: [i32; 3] => Pos, state: i32 => VarInt });
 packet!(ChangeDifficulty { difficulty: i32 => VarInt, locked: bool => Bool });
-// ResourceKey<GameRule<?>> is an identifier, followed by its string value.
-packet!(GameRuleEntry { name: String => Ident, value: String => Str });
-packet!(GameRuleValues { entries: Vec<GameRuleEntry> => List<GameRuleEntry> });
 packet!(ChunkBatchFinished { size: i32 => VarInt });
 packet!(ContainerClose { container: i32 => VarInt });
 packet!(ContainerSetContent {
@@ -275,52 +290,18 @@ packet!(
 );
 packet!(DisguisedChat { message: Tag => Nbt, chat_type: ChatTypeBound => ChatTypeBound });
 packet!(EntityEvent { id: i32 => Int, event: i8 => Byte });
-/// PositionPath: Linear(end position) or Stepped(list of (position, tick offset)).
-#[derive(Clone, Debug, PartialEq)]
-pub enum PositionPath {
-    Linear([f64; 3]),
-    Stepped(Vec<([f64; 3], i32)>),
-}
-impl PositionPath {
-    pub fn end(&self) -> [f64; 3] {
-        match self {
-            Self::Linear(p) => *p,
-            Self::Stepped(steps) => steps.last().map_or([0.0; 3], |s| s.0),
-        }
+packet!(
+    /// ClientboundEntityPositionSyncPacket: PositionMoveRotation (position,
+    /// delta movement, yRot, xRot), then onGround.
+    EntityPositionSync {
+        id: i32 => VarInt,
+        position: [f64; 3] => Vec3d,
+        delta: [f64; 3] => Vec3d,
+        yaw: f32 => Float,
+        pitch: f32 => Float,
+        on_ground: bool => Bool,
     }
-}
-impl Codec<PositionPath> for PositionPath {
-    fn read(r: &mut Reader) -> Result<Self> {
-        Ok(match r.varint()? {
-            1 => {
-                let n = r.count(r.remaining() / 25)?;
-                Self::Stepped(
-                    (0..n)
-                        .map(|_| Ok((Vec3d::read(r)?, r.varint()?)))
-                        .collect::<Result<_>>()?,
-                )
-            }
-            _ => Self::Linear(Vec3d::read(r)?),
-        })
-    }
-    fn write(v: &Self, w: &mut Writer) {
-        match v {
-            Self::Linear(p) => {
-                w.varint(0);
-                Vec3d::write(p, w);
-            }
-            Self::Stepped(steps) => {
-                w.varint(1);
-                w.varint(steps.len() as i32);
-                for (p, t) in steps {
-                    Vec3d::write(p, w);
-                    w.varint(*t);
-                }
-            }
-        }
-    }
-}
-packet!(EntityPositionSync { id: i32 => VarInt, path: PositionPath => PositionPath, yaw: f32 => Float, pitch: f32 => Float, on_ground: bool => Bool });
+);
 packet!(ForgetLevelChunk { pos: [i32; 2] => ChunkPos });
 packet!(
     /// ClientboundChunksBiomesPacket.ChunkBiomeData: a column and its
@@ -383,7 +364,6 @@ packet!(Login {
     show_death_screen: bool => Bool,
     limited_crafting: bool => Bool,
     spawn: SpawnInfo => SpawnInfo,
-    online_mode: bool => Bool,
     enforces_secure_chat: bool => Bool,
 });
 packet!(
@@ -448,70 +428,23 @@ packet!(MapItemData {
     decorations: Option<Vec<MapDecoration>> => Opt<List<MapDecoration>>,
     patch: Option<MapPatch> => MapPatchOpt,
 });
-/// VecDelta: per-axis deltas in 1/4096 blocks, linear or in timed steps.
-#[derive(Clone, Debug, PartialEq)]
-pub enum VecDelta {
-    Linear([i16; 3]),
-    Stepped(Vec<([i16; 3], i32)>),
+/// VecDeltaCodec.decode against a base position: zero deltas keep the
+/// base coordinate exactly, others add to its 1/4096 quantization.
+pub fn apply_delta(base: [f64; 3], delta: [i16; 3]) -> [f64; 3] {
+    let mut out = base;
+    for i in 0..3 {
+        if delta[i] != 0 {
+            out[i] = ((base[i] * 4096.0).round() as i64 + i64::from(delta[i])) as f64 / 4096.0;
+        }
+    }
+    out
 }
-impl VecDelta {
-    /// VecDeltaCodec.decode against a base position: zero deltas keep the
-    /// base coordinate exactly, others add to its 1/4096 quantization.
-    pub fn apply(base: [f64; 3], delta: [i16; 3]) -> [f64; 3] {
-        let mut out = base;
-        for i in 0..3 {
-            if delta[i] != 0 {
-                out[i] = ((base[i] * 4096.0).round() as i64 + i64::from(delta[i])) as f64 / 4096.0;
-            }
-        }
-        out
-    }
-    /// The final position after all steps.
-    pub fn end(&self, base: [f64; 3]) -> [f64; 3] {
-        match self {
-            Self::Linear(d) => Self::apply(base, *d),
-            Self::Stepped(steps) => steps.iter().fold(base, |p, (d, _)| Self::apply(p, *d)),
-        }
-    }
-    fn read(r: &mut Reader, steps: usize) -> Result<Self> {
-        if steps == 0 {
-            return Ok(Self::Linear([r.i16()?, r.i16()?, r.i16()?]));
-        }
-        if steps > r.remaining() / 7 {
-            return Err(Error::new("VecDelta with too many steps"));
-        }
-        Ok(Self::Stepped(
-            (0..steps)
-                .map(|_| {
-                    let ticks = r.varint()?;
-                    Ok(([r.i16()?, r.i16()?, r.i16()?], ticks))
-                })
-                .collect::<Result<_>>()?,
-        ))
-    }
-    fn steps(&self) -> usize {
-        match self {
-            Self::Linear(_) => 0,
-            Self::Stepped(s) => s.len(),
-        }
-    }
-    fn write(&self, w: &mut Writer) {
-        match self {
-            Self::Linear(d) => d.iter().for_each(|v| w.i16(*v)),
-            Self::Stepped(steps) => {
-                for (d, ticks) in steps {
-                    w.varint(*ticks);
-                    d.iter().for_each(|v| w.i16(*v));
-                }
-            }
-        }
-    }
-}
-/// ClientboundMoveEntityPacket.Pos / PosRot / Rot.
+/// ClientboundMoveEntityPacket.Pos / PosRot / Rot: the id, the 1/4096
+/// deltas (three shorts), the packed rotation, then onGround.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MoveEntity {
     pub id: i32,
-    pub delta: Option<VecDelta>,
+    pub delta: Option<[i16; 3]>,
     pub rotation: Option<(i8, i8)>,
     pub on_ground: bool,
 }
@@ -521,48 +454,28 @@ macro_rules! move_entity {
         pub struct $name(pub MoveEntity);
         impl Codec<$name> for $name {
             fn read(r: &mut Reader) -> Result<$name> {
-                Self::read_inner(r).map($name)
-            }
-            fn write(v: &$name, w: &mut Writer) {
-                Self::write_inner(&v.0, w)
-            }
-        }
-        impl $name {
-            fn read_inner(r: &mut Reader) -> Result<MoveEntity> {
                 let id = r.varint()?;
-                if !$pos {
-                    let on_ground = r.bool()?;
-                    let rotation = Some((r.i8()?, r.i8()?));
-                    return Ok(MoveEntity {
-                        id,
-                        delta: None,
-                        rotation,
-                        on_ground,
-                    });
-                }
-                let properties = r.varint()?;
-                let delta = Some(VecDelta::read(r, (properties as u32 >> 1) as usize)?);
+                let delta = if $pos { Some([r.i16()?, r.i16()?, r.i16()?]) } else { None };
                 let rotation = if $rot { Some((r.i8()?, r.i8()?)) } else { None };
-                Ok(MoveEntity {
+                Ok($name(MoveEntity {
                     id,
                     delta,
                     rotation,
-                    on_ground: properties & 1 != 0,
-                })
+                    on_ground: r.bool()?,
+                }))
             }
-            fn write_inner(v: &MoveEntity, w: &mut Writer) {
+            fn write(v: &$name, w: &mut Writer) {
+                let v = &v.0;
                 w.varint(v.id);
-                if !$pos {
-                    w.bool(v.on_ground);
-                } else {
-                    let delta = v.delta.clone().unwrap_or(VecDelta::Linear([0; 3]));
-                    w.varint(i32::from(v.on_ground) | (delta.steps() as i32) << 1);
-                    delta.write(w);
+                if $pos {
+                    v.delta.unwrap_or([0; 3]).iter().for_each(|d| w.i16(*d));
                 }
-                if let Some((y, x)) = v.rotation.filter(|_| $rot) {
+                if $rot {
+                    let (y, x) = v.rotation.unwrap_or((0, 0));
                     w.i8(y);
                     w.i8(x);
                 }
+                w.bool(v.on_ground);
             }
         }
     };
@@ -576,7 +489,7 @@ packet!(OpenScreen { container: i32 => VarInt, menu: i32 => VarInt, title: Tag =
 packet!(MountScreenOpen { container: i32 => VarInt, columns: i32 => VarInt, entity: i32 => Int });
 packet!(
     /// ClientboundOpenSignEditorPacket: the sign whose side the player edits.
-    OpenSignEditor { pos: [i32; 3] => Pos, front: bool => SignSide }
+    OpenSignEditor { pos: [i32; 3] => Pos, front: bool => Bool }
 );
 packet!(
     /// ClientboundOpenBookPacket: the hand (InteractionHand, 0 main, 1 off)
@@ -880,10 +793,10 @@ packet!(
 );
 packet!(SetPlayerInventory { slot: i32 => VarInt, item: Option<Stack> => Slot });
 packet!(
-    /// ClockNetworkState for one world clock (registry id).
-    ClockState { clock: i32 => VarInt, total_ticks: i64 => VarLong, partial_tick: f32 => Float, rate: f32 => Float }
+    /// ClientboundSetTimePacket: the game time, the day time and whether the
+    /// day time advances (the `advance_time` game rule).
+    SetTime { game_time: i64 => Long, day_time: i64 => Long, tick_day_time: bool => Bool }
 );
-packet!(SetTime { game_time: i64 => Long, clocks: Vec<ClockState> => List<ClockState> });
 packet!(TitlesAnimation { fade_in: i32 => Int, stay: i32 => Int, fade_out: i32 => Int });
 /// SoundEvent holder: a registry id, or an inline location with optional range.
 pub struct SoundHolder;
@@ -1057,11 +970,10 @@ impl Codec<SetObjective> for SetObjective {
         }
     }
 }
-/// ClientboundLevelParticlesPacket: a particle, whether it ignores the
-/// client's particle setting (`overrideLimiter`) and its distance limit
-/// (`alwaysShow`), where, the spread and the speed on each axis, how many
-/// (0: one, moving by speed times spread) and the randomization type
-/// (0 default: gaussian spread and speed).
+/// ClientboundLevelParticlesPacket: whether it ignores the client's particle
+/// setting (`overrideLimiter`) and its distance limit (`alwaysShow`), where,
+/// the spread on each axis, the speed, how many (0: one, moving by speed
+/// times spread), then the particle.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelParticles {
     pub particle: Particle,
@@ -1069,33 +981,35 @@ pub struct LevelParticles {
     pub always_show: bool,
     pub pos: [f64; 3],
     pub dist: [f32; 3],
-    pub max_speed: [f32; 3],
+    pub max_speed: f32,
     pub count: i32,
-    pub randomization: i32,
 }
 impl Codec<LevelParticles> for LevelParticles {
     fn read(r: &mut Reader) -> Result<Self> {
+        let override_limiter = r.bool()?;
+        let always_show = r.bool()?;
+        let pos = Vec3d::read(r)?;
+        let dist = [r.f32()?, r.f32()?, r.f32()?];
+        let max_speed = r.f32()?;
+        let count = r.i32()?;
         Ok(Self {
             particle: Particle::read(r)?,
-            override_limiter: r.bool()?,
-            always_show: r.bool()?,
-            pos: Vec3d::read(r)?,
-            dist: [r.f32()?, r.f32()?, r.f32()?],
-            max_speed: [r.f32()?, r.f32()?, r.f32()?],
-            count: r.varint()?,
-            randomization: r.varint()?,
+            override_limiter,
+            always_show,
+            pos,
+            dist,
+            max_speed,
+            count,
         })
     }
     fn write(v: &Self, w: &mut Writer) {
-        v.particle.write(w);
         w.bool(v.override_limiter);
         w.bool(v.always_show);
         Vec3d::write(&v.pos, w);
-        for f in v.dist.iter().chain(&v.max_speed) {
-            w.f32(*f);
-        }
-        w.varint(v.count);
-        w.varint(v.randomization);
+        v.dist.iter().for_each(|f| w.f32(*f));
+        w.f32(v.max_speed);
+        w.i32(v.count);
+        v.particle.write(w);
     }
 }
 /// `ExplosionParticleInfo` in a `WeightedList`: a particle the blast
@@ -1109,7 +1023,7 @@ pub struct ExplosionParticle {
 }
 /// ClientboundExplodePacket: the centre, radius and blocks destroyed, the
 /// push the receiving player takes, the particle at the centre, the sound,
-/// the particles the blast scatters, and whether the sound plays.
+/// and the particles the blast scatters.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Explode {
     pub center: [f64; 3],
@@ -1119,7 +1033,6 @@ pub struct Explode {
     pub particle: Particle,
     pub sound: (i32, Option<(String, Option<f32>)>),
     pub block_particles: Vec<ExplosionParticle>,
-    pub play_sound: bool,
 }
 impl Codec<Explode> for Explode {
     fn read(r: &mut Reader) -> Result<Self> {
@@ -1147,7 +1060,6 @@ impl Codec<Explode> for Explode {
             particle,
             sound,
             block_particles,
-            play_sound: r.bool()?,
         })
     }
     fn write(v: &Self, w: &mut Writer) {
@@ -1164,7 +1076,6 @@ impl Codec<Explode> for Explode {
             w.f32(b.speed);
             w.varint(b.weight);
         }
-        w.bool(v.play_sound);
     }
 }
 /// `ClientboundSetPlayerTeamPacket.Parameters`.
@@ -1177,11 +1088,14 @@ pub struct TeamParameters {
     pub name_tag_visibility: i32,
     /// `Team.CollisionRule` id.
     pub collision_rule: i32,
-    /// `TeamColor` id (0 black .. 15 white), absent for no colour.
+    /// ChatFormatting colour ordinal (0 black .. 15 white), absent for no
+    /// colour (RESET on the wire).
     pub color: Option<i32>,
     /// 1: friendly fire, 2: see friendly invisibles.
     pub options: i8,
 }
+/// `ChatFormatting.RESET`'s ordinal: a team with no colour.
+pub const CHAT_FORMATTING_RESET: i32 = 21;
 /// ClientboundSetPlayerTeamPacket: method 0 adds (parameters and players),
 /// 1 removes, 2 changes (parameters), 3 joins and 4 leaves (players).
 #[derive(Clone, Debug, PartialEq)]
@@ -1196,14 +1110,20 @@ impl Codec<SetPlayerTeam> for SetPlayerTeam {
         let name = r.string(32767)?;
         let method = r.i8()?;
         let parameters = if method == 0 || method == 2 {
+            let display_name = r.nbt()?;
+            let options = r.i8()?;
+            let name_tag_visibility = r.varint()?;
+            let collision_rule = r.varint()?;
+            // ChatFormatting ordinal: 0..15 colours; formats and RESET none.
+            let color = Some(r.varint()?).filter(|c| (0..16).contains(c));
             Some(TeamParameters {
-                display_name: r.nbt()?,
+                display_name,
                 prefix: r.nbt()?,
                 suffix: r.nbt()?,
-                name_tag_visibility: r.varint()?,
-                collision_rule: r.varint()?,
-                color: <Opt<VarInt>>::read(r)?,
-                options: r.i8()?,
+                name_tag_visibility,
+                collision_rule,
+                color,
+                options,
             })
         } else {
             None
@@ -1234,12 +1154,12 @@ impl Codec<SetPlayerTeam> for SetPlayerTeam {
                 options: 0,
             });
             w.nbt(&p.display_name);
-            w.nbt(&p.prefix);
-            w.nbt(&p.suffix);
+            w.i8(p.options);
             w.varint(p.name_tag_visibility);
             w.varint(p.collision_rule);
-            <Opt<VarInt>>::write(&p.color, w);
-            w.i8(p.options);
+            w.varint(p.color.unwrap_or(CHAT_FORMATTING_RESET));
+            w.nbt(&p.prefix);
+            w.nbt(&p.suffix);
         }
         if matches!(v.method, 0 | 3 | 4) {
             <List<Str>>::write(&v.players, w);
@@ -1334,7 +1254,7 @@ pub struct CommandNode {
     /// Custom suggestion provider (`minecraft:ask_server`).
     pub suggestions: Option<String>,
 }
-/// The `minecraft:command_argument_type` registry of 26.3 in id order
+/// The `minecraft:command_argument_type` registry of 1.21.11 in id order
 /// (ArgumentTypeInfos.bootstrap).
 pub const ARGUMENT_TYPES: &[&str] = &[
     "brigadier:bool",
@@ -1353,7 +1273,7 @@ pub const ARGUMENT_TYPES: &[&str] = &[
     "minecraft:block_predicate",
     "minecraft:item_stack",
     "minecraft:item_predicate",
-    "minecraft:team_color",
+    "minecraft:color",
     "minecraft:hex_color",
     "minecraft:component",
     "minecraft:style",
@@ -1392,17 +1312,12 @@ pub const ARGUMENT_TYPES: &[&str] = &[
     "minecraft:loot_table",
     "minecraft:loot_predicate",
     "minecraft:loot_modifier",
-    "minecraft:context_float_provider",
-    "minecraft:context_int_provider",
-    "minecraft:slot_source",
     "minecraft:dialog",
-    "minecraft:feature",
-    "minecraft:swing_animation",
     "minecraft:uuid",
 ];
 
 /// The properties of an argument parser (`ArgumentTypeInfo.Template`) as
-/// one of the 26.3 parsers decoded from the network.
+/// one of the 1.21.11 parsers decoded from the network.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ArgumentProperties {
     None,
@@ -1603,6 +1518,9 @@ pub struct AdvancementDisplay {
     pub show_toast: bool,
     pub hidden: bool,
     pub background: Option<String>,
+    /// Where the advancement sits in its tab.
+    pub x: f32,
+    pub y: f32,
 }
 /// `ClientboundUpdateAdvancementsPacket.PositionedAdvancement`.
 #[derive(Clone, Debug, PartialEq)]
@@ -1612,8 +1530,6 @@ pub struct Advancement {
     pub display: Option<AdvancementDisplay>,
     pub requirements: Vec<Vec<String>>,
     pub telemetry: bool,
-    pub x: f32,
-    pub y: f32,
 }
 /// `ClientboundUpdateAdvancementsPacket`: whether it replaces what the
 /// client has, the advancements added and removed, the progress of each
@@ -1642,7 +1558,7 @@ impl Codec<UpdateAdvancements> for UpdateAdvancements {
             let display = if r.bool()? {
                 let title = r.nbt()?;
                 let description = r.nbt()?;
-                let icon = crate::item::Template::read(r)?;
+                let icon = crate::item::NonEmpty::read(r)?;
                 let frame = r.varint()?;
                 let flags = r.i32()?;
                 let background = if flags & 1 != 0 {
@@ -1658,6 +1574,8 @@ impl Codec<UpdateAdvancements> for UpdateAdvancements {
                     show_toast: flags & 2 != 0,
                     hidden: flags & 4 != 0,
                     background,
+                    x: r.f32()?,
+                    y: r.f32()?,
                 })
             } else {
                 None
@@ -1669,15 +1587,12 @@ impl Codec<UpdateAdvancements> for UpdateAdvancements {
                 requirements.push((0..k).map(|_| r.string(32767)).collect::<Result<_>>()?);
             }
             let telemetry = r.bool()?;
-            let (x, y) = (r.f32()?, r.f32()?);
             added.push(Advancement {
                 id,
                 parent,
                 display,
                 requirements,
                 telemetry,
-                x,
-                y,
             });
         }
         let n = r.count(r.remaining())?;
@@ -1717,7 +1632,7 @@ impl Codec<UpdateAdvancements> for UpdateAdvancements {
             if let Some(d) = &a.display {
                 w.nbt(&d.title);
                 w.nbt(&d.description);
-                crate::item::Template::write(&d.icon, w);
+                crate::item::NonEmpty::write(&d.icon, w);
                 w.varint(d.frame);
                 w.i32(
                     i32::from(d.background.is_some())
@@ -1727,6 +1642,8 @@ impl Codec<UpdateAdvancements> for UpdateAdvancements {
                 if let Some(b) = &d.background {
                     w.string(b);
                 }
+                w.f32(d.x);
+                w.f32(d.y);
             }
             w.varint(a.requirements.len() as i32);
             for g in &a.requirements {
@@ -1736,8 +1653,6 @@ impl Codec<UpdateAdvancements> for UpdateAdvancements {
                 }
             }
             w.bool(a.telemetry);
-            w.f32(a.x);
-            w.f32(a.y);
         }
         w.varint(v.removed.len() as i32);
         for id in &v.removed {
@@ -2152,7 +2067,7 @@ impl Codec<TrackedWaypoint> for TrackedWaypoint {
 
 // ---- serverbound -------------------------------------------------------
 
-packet!(AcceptTeleportation { id: i32 => VarInt, x: f64 => Double, y: f64 => Double, z: f64 => Double, yaw: f32 => Float, pitch: f32 => Float });
+packet!(AcceptTeleportation { id: i32 => VarInt });
 packet!(Attack { id: i32 => VarInt });
 packet!(TeleportToEntity { uuid: u128 => Uuid });
 packet!(
@@ -2223,10 +2138,9 @@ packet!(ChangeDifficultyRequest { difficulty: i32 => VarInt });
 packet!(LockDifficulty { locked: bool => Bool });
 // ServerboundPlayerAbilitiesPacket: only whether the player flies (2).
 packet!(PlayerAbilitiesRequest { flags: i8 => Byte });
-packet!(SetGameRule { entries: Vec<GameRuleEntry> => List<GameRuleEntry> });
 packet!(ChunkBatchReceived { chunks_per_tick: f32 => Float });
 packet!(
-    /// ServerboundClientCommandPacket.Action: 0 respawn, 1 request stats, 2 request game rules.
+    /// ServerboundClientCommandPacket.Action: 0 respawn, 1 request stats.
     ClientCommand { action: i32 => VarInt }
 );
 /// Changed slots: (slot, hashed stack) pairs.
@@ -2284,8 +2198,9 @@ packet!(
     RenameItem { name: String => Str }
 );
 packet!(
-    /// ServerboundSignUpdatePacket: the four lines the player wrote on a side.
-    SignUpdate { pos: [i32; 3] => Pos, lines: [String; 4] => SignLines, front: bool => SignSide }
+    /// ServerboundSignUpdatePacket: the side (`isFrontText`), then the four
+    /// lines the player wrote on it.
+    SignUpdate { pos: [i32; 3] => Pos, front: bool => Bool, lines: [String; 4] => SignLines }
 );
 packet!(
     /// ServerboundSetJigsawBlockPacket: the jigsaw block's edit screen. The
@@ -2470,17 +2385,6 @@ impl Codec<Vec<String>> for BookPages {
         List::<StrN<1024>>::write(v, w);
     }
 }
-/// SignTextSlot.STREAM_CODEC: VarInt 0 for the back, 1 for the front (any
-/// other id reads as the back, ByIdMap's ZERO strategy).
-pub struct SignSide;
-impl Codec<bool> for SignSide {
-    fn read(r: &mut Reader) -> Result<bool> {
-        Ok(r.varint()? == 1)
-    }
-    fn write(v: &bool, w: &mut Writer) {
-        w.varint(i32::from(*v));
-    }
-}
 /// `stringUtf8(384)` in `fixedSizeList(4)`: four lines, no count.
 pub struct SignLines;
 impl Codec<[String; 4]> for SignLines {
@@ -2572,10 +2476,20 @@ packet!(
 );
 packet!(PickItemFromBlock { pos: [i32; 3] => Pos, include_data: bool => Bool });
 packet!(PickItemFromEntity { id: i32 => VarInt, include_data: bool => Bool });
+/// ServerboundPlayerActionPacket.Action ordinals (1.21.11).
+pub mod player_action {
+    pub const START_DESTROY_BLOCK: i32 = 0;
+    pub const ABORT_DESTROY_BLOCK: i32 = 1;
+    pub const STOP_DESTROY_BLOCK: i32 = 2;
+    pub const DROP_ALL_ITEMS: i32 = 3;
+    pub const DROP_ITEM: i32 = 4;
+    pub const RELEASE_USE_ITEM: i32 = 5;
+    pub const SWAP_ITEM_WITH_OFFHAND: i32 = 6;
+    pub const STAB: i32 = 7;
+}
 packet!(
-    /// ServerboundPlayerActionPacket.Action: 0 start destroy, 1 change destroy
-    /// direction, 2 abort, 3 stop destroy, 4 drop all, 5 drop item, 6 release
-    /// use item, 7 swap offhand, 8 stab. Direction is the 3D data value.
+    /// ServerboundPlayerActionPacket: a [`player_action`] ordinal, the block
+    /// and its face (the 3D data value), and the block-change sequence.
     PlayerAction { action: i32 => VarInt, pos: [i32; 3] => Pos, direction: u8 => UByte, sequence: i32 => VarInt }
 );
 packet!(
@@ -2688,10 +2602,10 @@ mod tests {
     #[test]
     fn merchant_cost_predicate_is_a_typed_list_without_patch_counts() {
         // ItemCost.STREAM_CODEC: item=7, count=1, one typed component,
-        // potion_contents=53, potion present (water=0), no color/effects/name.
+        // potion_contents=49, potion present (water=0), no color/effects/name.
         // Result: count=1, item=8, empty component patch. Secondary cost:
         // item=9, count=2, empty predicate, followed by the offer fields.
-        let mut bytes = vec![1, 7, 1, 1, 53, 1, 0, 0, 0, 0, 1, 8, 0, 0, 1, 9, 2, 0, 0];
+        let mut bytes = vec![1, 7, 1, 1, 49, 1, 0, 0, 0, 0, 1, 8, 0, 0, 1, 9, 2, 0, 0];
         bytes.extend_from_slice(&[0; 4]); // uses
         bytes.extend_from_slice(&2i32.to_be_bytes()); // max uses
         bytes.extend_from_slice(&[0; 16]); // xp, special price, multiplier, demand
@@ -2701,7 +2615,7 @@ mod tests {
         assert_eq!(
             offers[0].cost_a.components,
             vec![(
-                53,
+                49,
                 Component::Potion {
                     potion: Some(0),
                     color: None,
@@ -2919,7 +2833,8 @@ mod tests {
             }),
             Clientbound::EntityPositionSync(EntityPositionSync {
                 id: 1,
-                path: PositionPath::Stepped(vec![([1.0, 2.0, 3.0], 0), ([1.5, 2.0, 3.0], 2)]),
+                position: [1.0, 2.0, 3.0],
+                delta: [0.5, 0.0, -0.25],
                 yaw: 1.0,
                 pitch: 2.0,
                 on_ground: true,
@@ -2974,18 +2889,17 @@ mod tests {
                 show_death_screen: true,
                 limited_crafting: false,
                 spawn: spawn(),
-                online_mode: false,
                 enforces_secure_chat: false,
             }),
             Clientbound::MoveEntityPos(MoveEntityPos(MoveEntity {
                 id: 3,
-                delta: Some(VecDelta::Linear([4096, 0, -4096])),
+                delta: Some([4096, 0, -4096]),
                 rotation: None,
                 on_ground: true,
             })),
             Clientbound::MoveEntityPosRot(MoveEntityPosRot(MoveEntity {
                 id: 3,
-                delta: Some(VecDelta::Stepped(vec![([1, 2, 3], 1), ([0, 0, 1], 2)])),
+                delta: Some([1, 2, 3]),
                 rotation: Some((10, -10)),
                 on_ground: false,
             })),
@@ -3089,31 +3003,29 @@ mod tests {
             Clientbound::SetEntityLink(SetEntityLink { source: 2, dest: 0 }),
             Clientbound::LevelParticles(LevelParticles {
                 particle: Particle {
-                    id: 21,
+                    id: 14,
                     data: Some(crate::entity_data::ParticleData::ColorScale(0xFF0000, 1.5)),
                 },
                 override_limiter: true,
                 always_show: false,
                 pos: [0.5, 101.0, 3.0],
                 dist: [0.2, 0.0, 0.2],
-                max_speed: [0.0; 3],
+                max_speed: 0.0,
                 count: 60,
-                randomization: 0,
             }),
             Clientbound::Explode(Explode {
                 center: [1.0, 2.0, 3.0],
                 radius: 4.0,
                 block_count: 12,
                 knockback: Some([0.5, 0.1, 0.0]),
-                particle: Particle { id: 29, data: None },
+                particle: Particle { id: 22, data: None },
                 sound: (-1, Some(("minecraft:entity.generic.explode".into(), None))),
                 block_particles: vec![ExplosionParticle {
-                    particle: Particle { id: 69, data: None },
+                    particle: Particle { id: 60, data: None },
                     scaling: 0.5,
                     speed: 1.0,
                     weight: 1,
                 }],
-                play_sound: true,
             }),
             Clientbound::ProjectilePower(ProjectilePower { id: 4, power: 0.1 }),
             Clientbound::SetEquipment(SetEquipment {
@@ -3123,7 +3035,8 @@ mod tests {
             Clientbound::UpdateAttributes(UpdateAttributes {
                 id: 2,
                 values: vec![AttributeSnapshot {
-                    attribute: 26,
+                    // movement_speed.
+                    attribute: 22,
                     base: 0.23,
                     modifiers: vec![AttributeModifier {
                         id: "minecraft:baby".into(),
@@ -3146,12 +3059,8 @@ mod tests {
             }),
             Clientbound::SetTime(SetTime {
                 game_time: 100,
-                clocks: vec![ClockState {
-                    clock: 0,
-                    total_ticks: 6000,
-                    partial_tick: 0.0,
-                    rate: 1.0,
-                }],
+                day_time: 6000,
+                tick_day_time: true,
             }),
             Clientbound::Sound(Sound {
                 sound: (12, None),
@@ -3207,11 +3116,11 @@ mod tests {
                         show_toast: false,
                         hidden: false,
                         background: Some("minecraft:block/stone".into()),
+                        x: 0.0,
+                        y: 1.5,
                     }),
                     requirements: vec![vec!["crafting_table".into()]],
                     telemetry: false,
-                    x: 0.0,
-                    y: 1.5,
                 }],
                 removed: vec!["minecraft:story/gone".into()],
                 progress: vec![(
@@ -3251,14 +3160,7 @@ mod tests {
     fn serverbound_round_trips() {
         let packets = vec![
             Serverbound::PingRequest(crate::packets::status::Ping { time: -7 }),
-            Serverbound::AcceptTeleportation(AcceptTeleportation {
-                id: 1,
-                x: 0.5,
-                y: 64.0,
-                z: 0.5,
-                yaw: 0.0,
-                pitch: 0.0,
-            }),
+            Serverbound::AcceptTeleportation(AcceptTeleportation { id: 1 }),
             Serverbound::Chat(Chat {
                 message: "hello".into(),
                 timestamp: 1,
@@ -3470,18 +3372,212 @@ mod tests {
     #[test]
     fn move_entity_deltas_decode_like_vec_delta_codec() {
         let base = [10.0, 64.0, -3.5];
-        assert_eq!(
-            VecDelta::Linear([4096, 0, -2048]).end(base),
-            [11.0, 64.0, -4.0]
-        );
+        assert_eq!(apply_delta(base, [4096, 0, -2048]), [11.0, 64.0, -4.0]);
         // Zero deltas keep unquantized base coordinates exactly.
         assert_eq!(
-            VecDelta::Linear([0, 0, 0]).end([0.123_456_789, 1.0, 2.0]),
+            apply_delta([0.123_456_789, 1.0, 2.0], [0, 0, 0]),
             [0.123_456_789, 1.0, 2.0]
         );
+    }
+
+    /// The 1.21.11 layouts that differ from 26.x, byte for byte.
+    #[test]
+    fn layouts_are_1_21_11s() {
+        fn body<T>(v: &T) -> Vec<u8>
+        where
+            T: Codec<T>,
+        {
+            let mut w = Writer::new();
+            T::write(v, &mut w);
+            w.data
+        }
+        fn be(parts: &[&[u8]]) -> Vec<u8> {
+            parts.concat()
+        }
+        // MoveEntity.Pos: id, three shorts, onGround.
+        let pos = MoveEntityPos(MoveEntity {
+            id: 3,
+            delta: Some([1, -1, 256]),
+            rotation: None,
+            on_ground: true,
+        });
+        assert_eq!(body(&pos), [3, 0, 1, 0xff, 0xff, 1, 0, 1]);
+        // PosRot: the shorts, yRot, xRot, then onGround.
+        let pos_rot = MoveEntityPosRot(MoveEntity {
+            id: 3,
+            delta: Some([0, 2, 0]),
+            rotation: Some((10, -10)),
+            on_ground: false,
+        });
+        assert_eq!(body(&pos_rot), [3, 0, 0, 0, 2, 0, 0, 10, 0xf6, 0]);
+        // Rot: yRot, xRot, then onGround.
+        let rot = MoveEntityRot(MoveEntity {
+            id: 3,
+            delta: None,
+            rotation: Some((1, 2)),
+            on_ground: true,
+        });
+        assert_eq!(body(&rot), [3, 1, 2, 1]);
+        // EntityPositionSync: id, PositionMoveRotation (position, delta,
+        // yRot, xRot), onGround.
+        let sync = EntityPositionSync {
+            id: 1,
+            position: [1.0, 2.0, 3.0],
+            delta: [0.5, 0.0, 0.0],
+            yaw: 90.0,
+            pitch: 0.0,
+            on_ground: true,
+        };
         assert_eq!(
-            VecDelta::Stepped(vec![([4096, 0, 0], 1), ([4096, 0, 0], 2)]).end(base),
-            [12.0, 64.0, -3.5]
+            body(&sync),
+            be(&[
+                &[1],
+                &1.0f64.to_be_bytes(),
+                &2.0f64.to_be_bytes(),
+                &3.0f64.to_be_bytes(),
+                &0.5f64.to_be_bytes(),
+                &0.0f64.to_be_bytes(),
+                &0.0f64.to_be_bytes(),
+                &90.0f32.to_be_bytes(),
+                &0.0f32.to_be_bytes(),
+                &[1],
+            ])
+        );
+        // SetTime: gameTime, dayTime, tickDayTime.
+        let time = SetTime {
+            game_time: 1,
+            day_time: -2,
+            tick_day_time: false,
+        };
+        assert_eq!(
+            body(&time),
+            be(&[&1i64.to_be_bytes(), &(-2i64).to_be_bytes(), &[0]])
+        );
+        // LevelParticles: the flags, position, spread, one max speed, an int
+        // count, then the particle (shriek, 103, with its delay).
+        let particles = LevelParticles {
+            particle: Particle {
+                id: 103,
+                data: Some(crate::entity_data::ParticleData::Delay(5)),
+            },
+            override_limiter: true,
+            always_show: false,
+            pos: [0.0; 3],
+            dist: [1.0, 2.0, 3.0],
+            max_speed: 0.5,
+            count: 7,
+        };
+        assert_eq!(
+            body(&particles),
+            be(&[
+                &[1, 0],
+                &[0; 24],
+                &1.0f32.to_be_bytes(),
+                &2.0f32.to_be_bytes(),
+                &3.0f32.to_be_bytes(),
+                &0.5f32.to_be_bytes(),
+                &7i32.to_be_bytes(),
+                &[103, 5],
+            ])
+        );
+        // Explode: no trailing playSound.
+        let explode = Explode {
+            center: [0.0; 3],
+            radius: 1.0,
+            block_count: 0,
+            knockback: None,
+            particle: Particle { id: 22, data: None },
+            sound: (5, None),
+            block_particles: Vec::new(),
+        };
+        assert_eq!(
+            body(&explode),
+            be(&[&[0; 24], &1.0f32.to_be_bytes(), &[0; 4], &[0, 22, 6, 0]])
+        );
+        // SpawnInfo: the game types are bytes, -1 for no previous one.
+        let mut spawn = spawn();
+        spawn.game_type = 1;
+        spawn.last_death = None;
+        let bytes = body(&spawn);
+        let after_seed = 1 + 1 + "minecraft:overworld".len() + 8;
+        assert_eq!(bytes[after_seed..after_seed + 2], [1, 0xff]);
+        assert_eq!(SpawnInfo::read(&mut Reader::new(&bytes)).unwrap(), spawn);
+        spawn.previous_game_type = Some(3);
+        assert_eq!(body(&spawn)[after_seed + 1], 3);
+        // Login: SpawnInfo, then enforcesSecureChat only.
+        let login = Login {
+            player_id: 1,
+            hardcore: false,
+            levels: Vec::new(),
+            max_players: 0,
+            chunk_radius: 0,
+            simulation_distance: 0,
+            reduced_debug_info: false,
+            show_death_screen: false,
+            limited_crafting: false,
+            spawn: spawn.clone(),
+            enforces_secure_chat: true,
+        };
+        assert_eq!(
+            body(&login),
+            be(&[&[0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], &body(&spawn), &[1]])
+        );
+        // SetPlayerTeam parameters: display, options, visibility, collision,
+        // the ChatFormatting ordinal (21, RESET, for none), prefix, suffix.
+        let team = |color| SetPlayerTeam {
+            name: "t".into(),
+            method: 2,
+            parameters: Some(TeamParameters {
+                display_name: Tag::End,
+                prefix: Tag::End,
+                suffix: Tag::End,
+                name_tag_visibility: 1,
+                collision_rule: 2,
+                color,
+                options: 3,
+            }),
+            players: Vec::new(),
+        };
+        assert_eq!(body(&team(None)), [1, b't', 2, 0, 3, 1, 2, 21, 0, 0]);
+        assert_eq!(body(&team(Some(12))), [1, b't', 2, 0, 3, 1, 2, 12, 0, 0]);
+        // A format code (bold, 17) is no team colour.
+        let read = SetPlayerTeam::read(&mut Reader::new(&[1, b't', 2, 0, 3, 1, 2, 17, 0, 0]));
+        assert_eq!(read.unwrap(), team(None));
+        // AcceptTeleportation: the id alone.
+        assert_eq!(body(&AcceptTeleportation { id: 300 }), [0xac, 2]);
+        // UpdateAdvancements: the display's icon is a count-first stack and
+        // its x, y follow the background; nothing after telemetry.
+        let advancements = UpdateAdvancements {
+            reset: false,
+            added: vec![Advancement {
+                id: "a".into(),
+                parent: None,
+                display: Some(AdvancementDisplay {
+                    title: Tag::End,
+                    description: Tag::End,
+                    icon: Stack::new(9, 2),
+                    frame: 1,
+                    show_toast: true,
+                    hidden: false,
+                    background: None,
+                    x: 1.0,
+                    y: 2.0,
+                }),
+                requirements: Vec::new(),
+                telemetry: false,
+            }],
+            removed: Vec::new(),
+            progress: Vec::new(),
+            show: true,
+        };
+        assert_eq!(
+            body(&advancements),
+            be(&[
+                &[0, 1, 1, b'a', 0, 1, 0, 0, 2, 9, 0, 0, 1, 0, 0, 0, 2],
+                &1.0f32.to_be_bytes(),
+                &2.0f32.to_be_bytes(),
+                &[0, 0, 0, 0, 1],
+            ])
         );
     }
 
@@ -3599,7 +3695,8 @@ mod tests {
         let p = Clientbound::UpdateAttributes(UpdateAttributes {
             id: 5,
             values: vec![AttributeSnapshot {
-                attribute: 1,
+                // minecraft:armor is 0 in 1.21.11.
+                attribute: 0,
                 base: 0.0,
                 modifiers: vec![AttributeModifier {
                     id: "minecraft:armor.helmet".into(),
@@ -3610,7 +3707,7 @@ mod tests {
         });
         let body = p.encode();
         // The packet id (129 on 1.21.11) is a two-byte VarInt.
-        let mut expected = vec![0x81, 1, 5, 1, 1];
+        let mut expected = vec![0x81, 1, 5, 1, 0];
         expected.extend(0.0f64.to_be_bytes());
         expected.extend([1, 22]);
         expected.extend(b"minecraft:armor.helmet");
@@ -3645,7 +3742,7 @@ mod tests {
 
     #[test]
     fn sign_packets_match_vanilla_stream_codecs() {
-        // ClientboundOpenSignEditorPacket: BlockPos, then SignTextSlot as a VarInt (FRONT is 1).
+        // ClientboundOpenSignEditorPacket: BlockPos, then `isFrontText` as a bool.
         let open = Clientbound::OpenSignEditor(OpenSignEditor {
             pos: [1, 2, 3],
             front: true,
@@ -3657,14 +3754,15 @@ mod tests {
         );
         assert_eq!(body[9..], [1]);
         round_trip(open, Clientbound::encode, Clientbound::decode);
-        // ServerboundSignUpdatePacket: BlockPos, four strings with no count, then the slot.
+        // ServerboundSignUpdatePacket: BlockPos, `isFrontText`, then four
+        // strings with no count.
         let update = Serverbound::SignUpdate(SignUpdate {
             pos: [-4, 70, 9],
-            lines: ["Hi".into(), String::new(), "x".into(), String::new()],
             front: false,
+            lines: ["Hi".into(), String::new(), "x".into(), String::new()],
         });
         let body = update.encode();
-        assert_eq!(body[9..], [2, b'H', b'i', 0, 1, b'x', 0, 0]);
+        assert_eq!(body[9..], [0, 2, b'H', b'i', 0, 1, b'x', 0]);
         round_trip(update, Serverbound::encode, Serverbound::decode);
     }
 

@@ -157,9 +157,10 @@ pub fn update_recipes(
             }
             None => w.varint(1),
         }
+        // ItemStack.STREAM_CODEC: the count, then the item.
         w.varint(item_stack);
-        w.varint(item(r["result"]["id"].as_str().unwrap_or("minecraft:air")));
         w.varint(r["result"]["count"].as_i64().unwrap_or(1) as i32);
+        w.varint(item(r["result"]["id"].as_str().unwrap_or("minecraft:air")));
         w.varint(0); // no components added
         w.varint(0); // nor removed
     }

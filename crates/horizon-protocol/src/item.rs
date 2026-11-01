@@ -13,7 +13,7 @@ mod skip;
 
 pub use hash::{Names, NoNames};
 
-/// minecraft:data_component_type registry ids (26.3).
+/// minecraft:data_component_type registry ids (1.21.11).
 pub mod component {
     pub const CUSTOM_DATA: i32 = 0;
     pub const MAX_STACK_SIZE: i32 = 1;
@@ -35,28 +35,30 @@ pub mod component {
     pub const ENCHANTMENT_GLINT_OVERRIDE: i32 = 21;
     /// `AttackRange`: six floats, in the record's field order.
     pub const ATTACK_RANGE: i32 = 30;
-    pub const STORED_ENCHANTMENTS: i32 = 45;
-    pub const PROFILE: i32 = 72;
-    pub const BANNER_PATTERNS: i32 = 74;
-    pub const BASE_COLOR: i32 = 75;
-    pub const DYED_COLOR: i32 = 47;
-    pub const MAP_ID: i32 = 48;
-    pub const MAP_POST_PROCESSING: i32 = 50;
-    pub const CHARGED_PROJECTILES: i32 = 51;
-    pub const BUNDLE_CONTENTS: i32 = 52;
-    pub const POTION_CONTENTS: i32 = 53;
-    pub const SUSPICIOUS_STEW_EFFECTS: i32 = 55;
-    pub const WRITABLE_BOOK_CONTENT: i32 = 56;
-    pub const WRITTEN_BOOK_CONTENT: i32 = 57;
-    pub const TRIM: i32 = 58;
-    pub const INSTRUMENT: i32 = 63;
-    pub const LODESTONE_TRACKER: i32 = 69;
-    pub const FIREWORK_EXPLOSION: i32 = 70;
-    pub const FIREWORKS: i32 = 71;
-    pub const BLOCK_ENTITY_DATA: i32 = 62;
-    pub const OMINOUS_BOTTLE_AMPLIFIER: i32 = 65;
-    pub const CONTAINER: i32 = 77;
-    pub const PAINTING_VARIANT: i32 = 109;
+    pub const STORED_ENCHANTMENTS: i32 = 41;
+    pub const DYED_COLOR: i32 = 42;
+    /// `MapItemColor`: an int.
+    pub const MAP_COLOR: i32 = 43;
+    pub const MAP_ID: i32 = 44;
+    pub const MAP_POST_PROCESSING: i32 = 46;
+    pub const CHARGED_PROJECTILES: i32 = 47;
+    pub const BUNDLE_CONTENTS: i32 = 48;
+    pub const POTION_CONTENTS: i32 = 49;
+    pub const SUSPICIOUS_STEW_EFFECTS: i32 = 51;
+    pub const WRITABLE_BOOK_CONTENT: i32 = 52;
+    pub const WRITTEN_BOOK_CONTENT: i32 = 53;
+    pub const TRIM: i32 = 54;
+    pub const BLOCK_ENTITY_DATA: i32 = 58;
+    pub const INSTRUMENT: i32 = 59;
+    pub const OMINOUS_BOTTLE_AMPLIFIER: i32 = 61;
+    pub const LODESTONE_TRACKER: i32 = 65;
+    pub const FIREWORK_EXPLOSION: i32 = 66;
+    pub const FIREWORKS: i32 = 67;
+    pub const PROFILE: i32 = 68;
+    pub const BANNER_PATTERNS: i32 = 70;
+    pub const BASE_COLOR: i32 = 71;
+    pub const CONTAINER: i32 = 73;
+    pub const PAINTING_VARIANT: i32 = 97;
 }
 
 /// A written book's content (`WrittenBookContent.STREAM_CODEC`). The raw title
@@ -294,9 +296,9 @@ impl Component {
             }
             CHARGED_PROJECTILES | BUNDLE_CONTENTS => {
                 let n = r.count(1024)?;
-                Self::Stacks((0..n).map(|_| Template::read(r)).collect::<Result<_>>()?)
+                Self::Stacks((0..n).map(|_| NonEmpty::read(r)).collect::<Result<_>>()?)
             }
-            DYED_COLOR => Self::Int(r.i32()?),
+            DYED_COLOR | MAP_COLOR => Self::Int(r.i32()?),
             UNBREAKABLE | CREATIVE_SLOT_LOCK => Self::Unit,
             ENCHANTMENT_GLINT_OVERRIDE => Self::Bool(r.bool()?),
             CUSTOM_NAME | ITEM_NAME => Self::Text(r.nbt()?),
@@ -444,15 +446,16 @@ impl Component {
                     _ => Self::Raw(bytes.to_vec()),
                 }
             }
-            // InstrumentComponent.STREAM_CODEC: a holder, a reference's id plus one.
-            // A direct instrument has no registry name: read past.
+            // InstrumentComponent.STREAM_CODEC: an EitherHolder (`true` and a
+            // holder, a reference's id plus one, or `false` and a key). A direct
+            // instrument or a bare key has no registry id here: read past.
             INSTRUMENT => {
                 let start = r.position();
                 skip::component(INSTRUMENT, r)?;
                 let bytes = r.since(start);
                 let mut ids = Reader::new(bytes);
-                match ids.varint() {
-                    Ok(id @ 1..) if ids.remaining() == 0 => Self::Instrument(id - 1),
+                match (ids.bool(), ids.varint()) {
+                    (Ok(true), Ok(id @ 1..)) if ids.remaining() == 0 => Self::Instrument(id - 1),
                     _ => Self::Raw(bytes.to_vec()),
                 }
             }
@@ -518,9 +521,14 @@ impl Component {
                 w.varint(material + 1);
                 w.varint(pattern + 1);
             }
-            Self::Instrument(id) => w.varint(id + 1),
+            Self::Instrument(id) => {
+                w.bool(true);
+                w.varint(id + 1);
+            }
             Self::PaintingVariant(id) => w.varint(id + 1),
-            Self::Int(v) if kind == component::DYED_COLOR => w.i32(*v),
+            Self::Int(v) if matches!(kind, component::DYED_COLOR | component::MAP_COLOR) => {
+                w.i32(*v)
+            }
             Self::Int(v) => w.varint(*v),
             Self::Unit => {}
             Self::Bool(v) => w.bool(*v),
@@ -602,7 +610,7 @@ impl Component {
             }
             Self::Stacks(stacks) => {
                 w.varint(stacks.len() as i32);
-                stacks.iter().for_each(|s| Template::write(s, w));
+                stacks.iter().for_each(|s| NonEmpty::write(s, w));
             }
             Self::Fireworks { flight, explosions } => {
                 w.varint(*flight);
@@ -749,20 +757,9 @@ impl Codec<Option<Stack>> for Slot {
         read_stack(r, false)
     }
     fn write(v: &Option<Stack>, w: &mut Writer) {
-        let Some(s) = v else {
-            w.varint(0);
-            return;
-        };
-        w.varint(s.count);
-        w.varint(s.item);
-        w.varint(s.added.len() as i32);
-        w.varint(s.removed.len() as i32);
-        for (kind, c) in &s.added {
-            w.varint(*kind);
-            c.write(*kind, w);
-        }
-        for kind in &s.removed {
-            w.varint(*kind);
+        match v {
+            Some(s) => NonEmpty::write(s, w),
+            None => w.varint(0),
         }
     }
 }
@@ -840,31 +837,15 @@ impl Codec<Option<Stack>> for DelimitedSlot {
     }
 }
 
-/// ItemStackTemplate.STREAM_CODEC: the item, the count, then the patch.
-pub struct Template;
-impl Codec<Stack> for Template {
+/// ItemStack.STREAM_CODEC: [`Slot`] that refuses the empty stack.
+pub struct NonEmpty;
+impl Codec<Stack> for NonEmpty {
     fn read(r: &mut Reader) -> Result<Stack> {
-        let item = r.varint()?;
-        let count = r.varint()?;
-        let positive = r.count(65536)?;
-        let negative = r.count(65536)?;
-        let mut added = Vec::with_capacity(positive.min(64));
-        for _ in 0..positive {
-            let kind = r.varint()?;
-            added.push((kind, Component::read(kind, r)?));
-        }
-        let removed = (0..negative).map(|_| r.varint()).collect::<Result<_>>()?;
-        Ok(Stack {
-            item,
-            count,
-            added,
-            removed,
-            wire: WirePatch::default(),
-        })
+        Slot::read(r)?.ok_or_else(|| crate::Error::new("empty item stack not allowed"))
     }
     fn write(s: &Stack, w: &mut Writer) {
-        w.varint(s.item);
         w.varint(s.count);
+        w.varint(s.item);
         w.varint(s.added.len() as i32);
         w.varint(s.removed.len() as i32);
         for (kind, c) in &s.added {
@@ -1053,7 +1034,7 @@ mod tests {
             .push((component::OMINOUS_BOTTLE_AMPLIFIER, Component::Int(3)));
         let mut w = Writer::new();
         Slot::write(&Some(bottle.clone()), &mut w);
-        assert_eq!(w.data, [1, 0xb0, 0x09, 1, 0, 65, 3]);
+        assert_eq!(w.data, [1, 0xb0, 0x09, 1, 0, 61, 3]);
         round::<Option<Stack>, Slot>(Some(bottle));
         let mut quill = Stack::new(1099, 1);
         quill.added.push((
@@ -1109,10 +1090,10 @@ mod tests {
     }
 
     #[test]
-    fn charged_projectiles_are_item_stack_templates() {
+    fn charged_projectiles_are_count_first_stacks() {
         // A crossbow (id 7) loaded with one arrow (id 9): ChargedProjectiles
-        // is a list of ItemStackTemplate, the item before the count.
-        let bytes = [1, 7, 1, 0, 51, 1, 9, 1, 0, 0];
+        // (47) is a list of ItemStack.STREAM_CODEC, the count before the item.
+        let bytes = [1, 7, 1, 0, 47, 1, 1, 9, 0, 0];
         let stack = Slot::read(&mut Reader::new(&bytes)).unwrap().unwrap();
         assert_eq!(
             stack.component(component::CHARGED_PROJECTILES),
@@ -1124,10 +1105,10 @@ mod tests {
     }
 
     #[test]
-    fn bundle_contents_are_item_stack_templates() {
-        // A bundle (id 7) holding 32 of item 9: BundleContents is a list of
-        // ItemStackTemplate, as ChargedProjectiles is.
-        let bytes = [1, 7, 1, 0, 52, 1, 9, 32, 0, 0];
+    fn bundle_contents_are_count_first_stacks() {
+        // A bundle (id 7) holding 32 of item 9: BundleContents (48) is a list
+        // of ItemStack.STREAM_CODEC, as ChargedProjectiles is.
+        let bytes = [1, 7, 1, 0, 48, 1, 32, 9, 0, 0];
         let stack = Slot::read(&mut Reader::new(&bytes)).unwrap().unwrap();
         assert_eq!(
             stack.component(component::BUNDLE_CONTENTS),
@@ -1141,7 +1122,7 @@ mod tests {
     #[test]
     fn filtered_book_pages_are_read_and_kept() {
         // A writable book with one page "hi" and its filtered "**".
-        let bytes = [1, 7, 1, 0, 56, 1, 2, b'h', b'i', 1, 2, b'*', b'*'];
+        let bytes = [1, 7, 1, 0, 52, 1, 2, b'h', b'i', 1, 2, b'*', b'*'];
         let stack = Slot::read(&mut Reader::new(&bytes)).unwrap().unwrap();
         assert_eq!(
             stack.component(component::WRITABLE_BOOK_CONTENT),
@@ -1164,8 +1145,8 @@ mod tests {
 
     #[test]
     fn unknown_components_are_errors() {
-        // 122 is past DataComponents' last id (cushion_color, 121).
-        let bytes = [1, 5, 1, 0, 122];
+        // 104 is past DataComponents' last id (shulker/color, 103).
+        let bytes = [1, 5, 1, 0, 104];
         assert!(Slot::read(&mut Reader::new(&bytes)).is_err());
     }
 
@@ -1195,14 +1176,14 @@ mod tests {
 
     #[test]
     fn a_partial_profile_decodes_from_the_wire() {
-        // count 1, item 1, one added component of kind 72 (profile): a partial
+        // count 1, item 1, one added component of kind 68 (profile): a partial
         // profile with an empty name, a UUID, one unsigned texture property
         // and an empty skin patch.
         let uuid = [
             0x7a, 0x5d, 0x6a, 0x1a, 0x30, 0xd7, 0x41, 0x87, 0x88, 0xc5, 0xef, 0xe9, 0x12, 0x01,
             0x89, 0x22,
         ];
-        let mut bytes = vec![1, 1, 1, 0, 72, 0, 1, 0, 1];
+        let mut bytes = vec![1, 1, 1, 0, 68, 0, 1, 0, 1];
         bytes.extend_from_slice(&uuid);
         bytes.extend_from_slice(&[1, 8]);
         bytes.extend_from_slice(b"textures");
@@ -1223,18 +1204,19 @@ mod tests {
 
     #[test]
     fn components_read_past_keep_their_bytes() {
-        // Vanilla 26.3's encoding (tools/test_item_wire_parity.py) of a chestplate's
-        // armour trim (decoded: both holders are references), a banner's patterns
-        // (one direct), a pot's sherds and a stew's effects: one server's
-        // inventory, recipe book and advancements had them.
+        // A chestplate's armour trim (both holders references), a banner's
+        // patterns (one direct), a pot's sherds (1.21.11: four item ids, brick
+        // for a plain side) and a stew's effects, with 1.21.11's component ids.
         for (hex, kind) in [
-            ("01bd0801003a0502", 58),
-            ("01890b01004a02200e000b6d696e6563726166743a7801790b", 74),
-            ("01880301004c01f60801000001be0c0100000001d30c010000", 76),
-            ("01a408010037020f6412a001", 55),
-            // A goat horn's instrument by reference (InstrumentComponent's holder).
-            ("01bd0801003f02", 63),
+            ("01bd080100360502", 54),
+            ("01890b01004602200e000b6d696e6563726166743a7801790b", 70),
+            ("018803010048 04f608be0cd30cf608", 72),
+            ("01a408010033020f6412a001", 51),
+            // A goat horn's instrument by reference: EitherHolder's `true`, then
+            // the holder (id + 1).
+            ("01bd0801003b0102", 59),
         ] {
+            let hex = hex.replace(' ', "");
             let bytes: Vec<u8> = (0..hex.len())
                 .step_by(2)
                 .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
@@ -1243,15 +1225,15 @@ mod tests {
             let stack = Slot::read(&mut r).unwrap();
             assert_eq!(r.remaining(), 0, "component {kind}");
             let expected = |c: &Component| match kind {
-                58 => {
+                54 => {
                     *c == Component::Trim {
                         material: 4,
                         pattern: 1,
                     }
                 }
                 // night_vision for 100 ticks, poison for the default 160.
-                55 => *c == Component::StewEffects(vec![(15, 100), (18, 160)]),
-                63 => *c == Component::Instrument(1),
+                51 => *c == Component::StewEffects(vec![(15, 100), (18, 160)]),
+                59 => *c == Component::Instrument(1),
                 _ => matches!(c, Component::Raw(_)),
             };
             assert!(
@@ -1272,12 +1254,12 @@ mod tests {
         // direct variant (0, width, height, asset id, no title, no author)
         // is read past. Both encode back to the same bytes.
         let asset = b"minecraft:x";
-        let mut direct = vec![1u8, 7, 1, 0, 109, 0, 2, 1, asset.len() as u8];
+        let mut direct = vec![1u8, 7, 1, 0, 97, 0, 2, 1, asset.len() as u8];
         direct.extend_from_slice(asset);
         direct.extend_from_slice(&[0, 0]);
         for (bytes, expected) in [
             (
-                vec![1u8, 7, 1, 0, 109, 5],
+                vec![1u8, 7, 1, 0, 97, 5],
                 Some(Component::PaintingVariant(4)),
             ),
             (direct, None),

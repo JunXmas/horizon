@@ -5,7 +5,7 @@
 use crate::{
     Result,
     buf::{Codec, Reader, Writer},
-    item::{Slot, Stack, Template},
+    item::{NonEmpty, Slot, Stack},
 };
 use horizon_world::nbt::Tag;
 
@@ -24,6 +24,9 @@ pub enum Value {
     Pos([i32; 3]),
     OptPos(Option<[i32; 3]>),
     OptUuid(Option<u128>),
+    /// OPTIONAL_GLOBAL_POS: a dimension and a block position (a lodestone
+    /// compass target, a player's last death).
+    OptGlobalPos(Option<(String, [i32; 3])>),
     /// Any VarInt-valued serializer (direction, block state, pose, variants ...).
     Id(i32),
     /// Several VarInts (VillagerData).
@@ -153,12 +156,8 @@ pub enum ParticleData {
     Delay(i32),
     /// Trail: target (3 doubles), ARGB color, duration.
     Trail([f64; 3], i32, i32),
-    /// An item (ItemStackTemplate: item, count, patch).
+    /// An item (ItemStack.STREAM_CODEC: count, item, patch).
     Item(Stack),
-    /// Geyser and geyser_plume: water blocks.
-    Geyser(i32),
-    /// Geyser_base and geyser_poof: water blocks, then the burst impulse.
-    GeyserBase(i32, f32),
     /// Vibration: where it travels to, then its arrival time in ticks.
     Vibration { source: PositionSource, ticks: i32 },
 }
@@ -172,32 +171,32 @@ pub enum PositionSource {
 impl Particle {
     pub fn read(r: &mut Reader) -> Result<Particle> {
         let id = r.varint()?;
-        // `minecraft:particle_type` registry order as of 26.3.
+        // `minecraft:particle_type` registry order as of 1.21.11.
         let data = match id {
-            1 | 2 | 36 | 121 | 125 => Some(ParticleData::State(r.varint()?)),
-            28 | 46 | 52 => Some(ParticleData::Color(r.i32()?)),
-            21 => {
+            1 | 2 | 29 | 109 | 113 => Some(ParticleData::State(r.varint()?)),
+            21 | 36 | 42 => Some(ParticleData::Color(r.i32()?)),
+            14 => {
                 let color = r.i32()?;
                 Some(ParticleData::ColorScale(color, r.f32()?))
             }
-            22 => {
+            15 => {
                 let from = r.i32()?;
                 let to = r.i32()?;
                 Some(ParticleData::ColorScale2(from, to, r.f32()?))
             }
-            23 | 56 => {
+            16 | 46 => {
                 let color = r.i32()?;
                 Some(ParticleData::ColorPower(color, r.f32()?))
             }
-            15 | 48 => Some(ParticleData::Scalar(r.f32()?)),
-            115 => Some(ParticleData::Delay(r.varint()?)),
-            59 => {
+            8 | 38 => Some(ParticleData::Scalar(r.f32()?)),
+            103 => Some(ParticleData::Delay(r.varint()?)),
+            49 => {
                 let at = [r.f64()?, r.f64()?, r.f64()?];
                 let color = r.i32()?;
                 Some(ParticleData::Trail(at, color, r.varint()?))
             }
-            57 => Some(ParticleData::Item(Template::read(r)?)),
-            58 => {
+            47 => Some(ParticleData::Item(NonEmpty::read(r)?)),
+            48 => {
                 let source = match r.varint()? {
                     0 => PositionSource::Block(crate::buf::Pos::read(r)?),
                     1 => {
@@ -214,11 +213,6 @@ impl Particle {
                     ticks: r.varint()?,
                 })
             }
-            7 | 10 => Some(ParticleData::Geyser(r.i32()?)),
-            8 | 9 => {
-                let water = r.i32()?;
-                Some(ParticleData::GeyserBase(water, r.f32()?))
-            }
             // Every other registered particle carries no data.
             _ => None,
         };
@@ -229,10 +223,8 @@ impl Particle {
         let Some(data) = &self.data else { return };
         match data {
             ParticleData::State(s) | ParticleData::Delay(s) => w.varint(*s),
-            ParticleData::Color(c) | ParticleData::Geyser(c) => w.i32(*c),
-            ParticleData::ColorScale(c, f)
-            | ParticleData::ColorPower(c, f)
-            | ParticleData::GeyserBase(c, f) => {
+            ParticleData::Color(c) => w.i32(*c),
+            ParticleData::ColorScale(c, f) | ParticleData::ColorPower(c, f) => {
                 w.i32(*c);
                 w.f32(*f);
             }
@@ -247,7 +239,7 @@ impl Particle {
                 w.i32(*c);
                 w.varint(*d);
             }
-            ParticleData::Item(s) => Template::write(s, w),
+            ParticleData::Item(s) => NonEmpty::write(s, w),
             ParticleData::Vibration { source, ticks } => {
                 match source {
                     PositionSource::Block(pos) => {
@@ -265,7 +257,7 @@ impl Particle {
         }
     }
 }
-/// Serializer ids in EntityDataSerializers registration order.
+/// Serializer ids in EntityDataSerializers registration order (1.21.11).
 pub mod serializer {
     pub const BYTE: i32 = 0;
     pub const INT: i32 = 1;
@@ -289,28 +281,23 @@ pub mod serializer {
     pub const OPTIONAL_UNSIGNED_INT: i32 = 19;
     pub const POSE: i32 = 20;
     pub const CAT_VARIANT: i32 = 21;
-    pub const CAT_SOUND_VARIANT: i32 = 22;
-    pub const COW_VARIANT: i32 = 23;
-    pub const COW_SOUND_VARIANT: i32 = 24;
-    pub const WOLF_VARIANT: i32 = 25;
-    pub const WOLF_SOUND_VARIANT: i32 = 26;
-    pub const FROG_VARIANT: i32 = 27;
-    pub const PIG_VARIANT: i32 = 28;
-    pub const PIG_SOUND_VARIANT: i32 = 29;
-    pub const CHICKEN_VARIANT: i32 = 30;
-    pub const CHICKEN_SOUND_VARIANT: i32 = 31;
-    pub const ZOMBIE_NAUTILUS_VARIANT: i32 = 32;
-    pub const OPTIONAL_GLOBAL_POS: i32 = 33;
-    pub const PAINTING_VARIANT: i32 = 34;
-    pub const SNIFFER_STATE: i32 = 35;
-    pub const ARMADILLO_STATE: i32 = 36;
-    pub const COPPER_GOLEM_STATE: i32 = 37;
-    pub const WEATHERING_COPPER_STATE: i32 = 38;
-    pub const VECTOR3: i32 = 39;
-    pub const QUATERNION: i32 = 40;
-    pub const RESOLVABLE_PROFILE: i32 = 41;
-    pub const HUMANOID_ARM: i32 = 42;
-    pub const DYE_COLOR: i32 = 43;
+    pub const COW_VARIANT: i32 = 22;
+    pub const WOLF_VARIANT: i32 = 23;
+    pub const WOLF_SOUND_VARIANT: i32 = 24;
+    pub const FROG_VARIANT: i32 = 25;
+    pub const PIG_VARIANT: i32 = 26;
+    pub const CHICKEN_VARIANT: i32 = 27;
+    pub const ZOMBIE_NAUTILUS_VARIANT: i32 = 28;
+    pub const OPTIONAL_GLOBAL_POS: i32 = 29;
+    pub const PAINTING_VARIANT: i32 = 30;
+    pub const SNIFFER_STATE: i32 = 31;
+    pub const ARMADILLO_STATE: i32 = 32;
+    pub const COPPER_GOLEM_STATE: i32 = 33;
+    pub const WEATHERING_COPPER_STATE: i32 = 34;
+    pub const VECTOR3: i32 = 35;
+    pub const QUATERNION: i32 = 36;
+    pub const RESOLVABLE_PROFILE: i32 = 37;
+    pub const HUMANOID_ARM: i32 = 38;
 }
 fn read_value(kind: i32, r: &mut Reader) -> Result<Option<Value>> {
     use serializer::*;
@@ -332,6 +319,12 @@ fn read_value(kind: i32, r: &mut Reader) -> Result<Option<Value>> {
         } else {
             None
         }),
+        OPTIONAL_GLOBAL_POS => Value::OptGlobalPos(if r.bool()? {
+            let dimension = r.string(32767)?;
+            Some((dimension, crate::buf::Pos::read(r)?))
+        } else {
+            None
+        }),
         OPTIONAL_LIVING_ENTITY_REFERENCE => {
             Value::OptUuid(if r.bool()? { Some(r.uuid()?) } else { None })
         }
@@ -339,7 +332,7 @@ fn read_value(kind: i32, r: &mut Reader) -> Result<Option<Value>> {
         VILLAGER_DATA => Value::Ids(vec![r.varint()?, r.varint()?, r.varint()?]),
         // VarInt-encoded: direction, block states, optional ints, pose, the
         // holder-registry variants (cat to zombie nautilus, painting) and the
-        // enum states (sniffer to weathering copper), arm, dye.
+        // enum states (sniffer to weathering copper), arm.
         DIRECTION
         | BLOCK_STATE
         | OPTIONAL_BLOCK_STATE
@@ -347,8 +340,7 @@ fn read_value(kind: i32, r: &mut Reader) -> Result<Option<Value>> {
         | POSE
         | CAT_VARIANT..=ZOMBIE_NAUTILUS_VARIANT
         | PAINTING_VARIANT..=WEATHERING_COPPER_STATE
-        | HUMANOID_ARM
-        | DYE_COLOR => Value::Id(r.varint()?),
+        | HUMANOID_ARM => Value::Id(r.varint()?),
         PARTICLE => Value::Particle(Particle::read(r)?),
         RESOLVABLE_PROFILE => Value::Profile(read_profile(r)?),
         PARTICLES => {
@@ -385,6 +377,13 @@ fn write_value(kind: i32, v: &Value, w: &mut Writer) {
             w.bool(p.is_some());
             if let Some(p) = p {
                 crate::buf::Pos::write(p, w);
+            }
+        }
+        Value::OptGlobalPos(p) => {
+            w.bool(p.is_some());
+            if let Some((dimension, pos)) = p {
+                w.string(dimension);
+                crate::buf::Pos::write(pos, w);
             }
         }
         Value::OptUuid(u) => {
@@ -482,22 +481,20 @@ mod tests {
         );
     }
 
-    /// Every particle data shape (26.3 codecs) round-trips, and a PARTICLES
+    /// Every particle data shape (1.21.11 codecs) round-trips, and a PARTICLES
     /// list is a VarInt count then each particle, so the entry after it
     /// still decodes.
     #[test]
     fn particles_round_trip() {
         let all = [
             (1, Some(ParticleData::State(2))),
-            (7, Some(ParticleData::Geyser(5))),
-            (8, Some(ParticleData::GeyserBase(3, 0.5))),
-            (15, Some(ParticleData::Scalar(1.0))),
-            (21, Some(ParticleData::ColorScale(0xff0000, 1.5))),
-            (22, Some(ParticleData::ColorScale2(1, 2, 0.75))),
-            (23, Some(ParticleData::ColorPower(-1, 2.0))),
-            (28, Some(ParticleData::Color(0x7f00ff00))),
+            (8, Some(ParticleData::Scalar(1.0))),
+            (14, Some(ParticleData::ColorScale(0xff0000, 1.5))),
+            (15, Some(ParticleData::ColorScale2(1, 2, 0.75))),
+            (16, Some(ParticleData::ColorPower(-1, 2.0))),
+            (21, Some(ParticleData::Color(0x7f00ff00))),
             (
-                57,
+                47,
                 Some(ParticleData::Item(Stack {
                     item: 42,
                     count: 3,
@@ -507,14 +504,14 @@ mod tests {
                 })),
             ),
             (
-                58,
+                48,
                 Some(ParticleData::Vibration {
                     source: PositionSource::Block([-12, 64, 300]),
                     ticks: 20,
                 }),
             ),
             (
-                58,
+                48,
                 Some(ParticleData::Vibration {
                     source: PositionSource::Entity {
                         id: 99,
@@ -523,8 +520,8 @@ mod tests {
                     ticks: 8,
                 }),
             ),
-            (59, Some(ParticleData::Trail([1.5, -2.0, 3.25], 9, 40))),
-            (115, Some(ParticleData::Delay(6))),
+            (49, Some(ParticleData::Trail([1.5, -2.0, 3.25], 9, 40))),
+            (103, Some(ParticleData::Delay(6))),
             (0, None),
         ]
         .map(|(id, data)| Particle { id, data });
@@ -549,6 +546,40 @@ mod tests {
                 (12, serializer::BYTE, Value::Byte(4)),
             ]
         );
+    }
+
+    /// 1.21.11's serializer ids and particle layouts on the wire: an item
+    /// particle is a count-first stack, OPTIONAL_GLOBAL_POS is a flag, a
+    /// dimension and a block position, and HUMANOID_ARM is 38.
+    #[test]
+    fn serializer_ids_and_item_particles_are_1_21_11s() {
+        let entries = vec![
+            (
+                9u8,
+                serializer::PARTICLE,
+                Value::Particle(Particle {
+                    id: 47,
+                    data: Some(ParticleData::Item(Stack::new(5, 3))),
+                }),
+            ),
+            (
+                10,
+                serializer::OPTIONAL_GLOBAL_POS,
+                Value::OptGlobalPos(Some(("a:b".into(), [0, 1, 0]))),
+            ),
+            (11, serializer::HUMANOID_ARM, Value::Id(1)),
+        ];
+        let mut w = Writer::new();
+        EntityData::write(&entries, &mut w);
+        #[rustfmt::skip]
+        let want = [
+            9, 16, 47, 3, 5, 0, 0,
+            10, 29, 1, 3, b'a', b':', b'b', 0, 0, 0, 0, 0, 0, 0, 1,
+            11, 38, 1,
+            0xFF,
+        ];
+        assert_eq!(w.data, want);
+        assert_eq!(EntityData::read(&mut Reader::new(&want)).unwrap(), entries);
     }
 
     /// RESOLVABLE_PROFILE (a mannequin's DATA_PROFILE): both ResolvableProfile

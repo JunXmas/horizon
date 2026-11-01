@@ -210,7 +210,7 @@ pub fn argument_type(id: i32, props: &[u8]) -> ArgType {
         "minecraft:block_predicate" => ArgType::BlockPredicate,
         "minecraft:item_stack" => ArgType::Item,
         "minecraft:item_predicate" => ArgType::ItemPredicate,
-        "minecraft:team_color" => ArgType::TeamColor,
+        "minecraft:color" => ArgType::TeamColor,
         "minecraft:hex_color" => ArgType::HexColor,
         "minecraft:component" => ArgType::Component,
         "minecraft:style" => ArgType::Style,

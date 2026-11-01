@@ -258,8 +258,9 @@ impl ServerAdvancements {
         if let Some(d) = &a.display {
             w.nbt(&json_to_nbt(&d.title));
             w.nbt(&json_to_nbt(&d.description));
-            w.varint(sync.id("minecraft:item", &d.icon).unwrap_or(0));
+            // ItemStack.STREAM_CODEC: count 1, the item, an empty patch.
             w.varint(1);
+            w.varint(sync.id("minecraft:item", &d.icon).unwrap_or(0));
             w.varint(0);
             w.varint(0);
             w.varint(match d.frame {
@@ -275,6 +276,10 @@ impl ServerAdvancements {
             if let Some(b) = &d.background {
                 w.string(b);
             }
+            // DisplayInfo.serializeToNetwork: its place in the tab.
+            let (x, y) = self.layout[i].unwrap_or((0, 0.0));
+            w.f32(x as f32);
+            w.f32(y);
         }
         w.varint(a.requirements.len() as i32);
         for group in &a.requirements {
@@ -284,9 +289,6 @@ impl ServerAdvancements {
             }
         }
         w.bool(false); // sends_telemetry_event
-        let (x, y) = self.layout[i].unwrap_or((0, 0.0));
-        w.f32(x as f32);
-        w.f32(y);
     }
 
     /// An `AdvancementProgress`: each criterion and when it was obtained.
@@ -364,24 +366,23 @@ impl ServerAdvancements {
         let slot = |n: &str| sync.id("minecraft:slot_display", n).unwrap_or(0);
         let mut w = Writer::new();
         w.varint(ids.start);
-        // The ingredients' TagSlotDisplays, an empty cell as an empty slot.
+        // The ingredients' displays (`Ingredient.display`), an empty cell as
+        // an empty slot.
         let slots = |w: &mut Writer, cells: &[Option<&Value>]| {
             w.varint(cells.len() as i32);
             for cell in cells {
                 match cell {
-                    Some(v) => {
-                        w.varint(slot("minecraft:tag"));
-                        holder_set(w, v, &item);
-                    }
+                    Some(v) => ingredient_display(w, v, &item, &slot),
                     None => w.varint(slot("minecraft:empty")),
                 }
             }
         };
         // The result as its ItemStackSlotDisplay, the station as its item.
         let result = |w: &mut Writer| {
+            // ItemStack.STREAM_CODEC: the count, the item, an empty patch.
             w.varint(slot("minecraft:item_stack"));
-            w.varint(item(r["result"]["id"].as_str().unwrap_or("minecraft:air")));
             w.varint(r["result"]["count"].as_i64().unwrap_or(1) as i32);
+            w.varint(item(r["result"]["id"].as_str().unwrap_or("minecraft:air")));
             w.varint(0);
             w.varint(0);
         };
@@ -437,8 +438,7 @@ impl ServerAdvancements {
                     sync.id("minecraft:recipe_display", "minecraft:furnace")
                         .unwrap_or(0),
                 );
-                w.varint(slot("minecraft:tag"));
-                holder_set(&mut w, &r["ingredient"], &item);
+                ingredient_display(&mut w, &r["ingredient"], &item, &slot);
                 w.varint(slot("minecraft:any_fuel"));
                 result(&mut w);
                 station(&mut w, crafting_station(kind));
@@ -537,6 +537,34 @@ fn shrink(rows: &[Value]) -> Vec<Vec<char>> {
         .collect()
 }
 
+/// `Ingredient.display`: a tag's `TagSlotDisplay` (its name), or a composite
+/// of each item's display. Items with a crafting remainder (buckets, bottles)
+/// would add a `WithRemainder`.
+// ponytail: no remainder; add WithRemainder when an ingredient lists a bucket item.
+fn ingredient_display(
+    w: &mut Writer,
+    v: &Value,
+    item: &dyn Fn(&str) -> i32,
+    slot: &dyn Fn(&str) -> i32,
+) {
+    let items: Vec<&str> = match v {
+        Value::String(s) if s.starts_with('#') => {
+            w.varint(slot("minecraft:tag"));
+            w.string(&s[1..]);
+            return;
+        }
+        Value::String(s) => vec![s],
+        Value::Array(a) => a.iter().map(|s| s.as_str().unwrap_or("")).collect(),
+        _ => Vec::new(),
+    };
+    w.varint(slot("minecraft:composite"));
+    w.varint(items.len() as i32);
+    for name in items {
+        w.varint(slot("minecraft:item"));
+        w.varint(item(name));
+    }
+}
+
 /// ByteBufCodecs.holderSet for an ingredient: a tag by name, or the items.
 fn holder_set(w: &mut Writer, v: &Value, item: &dyn Fn(&str) -> i32) {
     match v {
@@ -582,15 +610,12 @@ mod tests {
       "minecraft:slot_display": {"entries": {
         "minecraft:empty": {"protocol_id": 0},
         "minecraft:any_fuel": {"protocol_id": 1},
-        "minecraft:with_any_potion": {"protocol_id": 2},
-        "minecraft:only_with_component": {"protocol_id": 3},
-        "minecraft:item": {"protocol_id": 4},
-        "minecraft:item_stack": {"protocol_id": 5},
-        "minecraft:tag": {"protocol_id": 6},
-        "minecraft:dyed": {"protocol_id": 7},
-        "minecraft:smithing_trim": {"protocol_id": 8},
-        "minecraft:with_remainder": {"protocol_id": 9},
-        "minecraft:composite": {"protocol_id": 10}
+        "minecraft:item": {"protocol_id": 2},
+        "minecraft:item_stack": {"protocol_id": 3},
+        "minecraft:tag": {"protocol_id": 4},
+        "minecraft:smithing_trim": {"protocol_id": 5},
+        "minecraft:with_remainder": {"protocol_id": 6},
+        "minecraft:composite": {"protocol_id": 7}
       }},
       "minecraft:recipe_display": {"entries": {
         "minecraft:crafting_shapeless": {"protocol_id": 0},
@@ -644,6 +669,38 @@ mod tests {
         (sync, entry)
     }
 
+    /// The first tick's ClientboundUpdateAdvancementsPacket reads back with
+    /// the protocol's 1.21.11 codec: a count-first icon and the x, y in the
+    /// display.
+    #[test]
+    fn the_advancements_packet_is_1_21_11s() {
+        let root = resources("advancements", &[]);
+        let dir = root.join("data/minecraft/advancement/story");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("root.json"),
+            r#"{"display":{"icon":{"id":"minecraft:furnace"},"title":"T","description":"D",
+                "background":"minecraft:block/stone"},
+                "criteria":{"tick":{"trigger":"minecraft:tick"}}}"#,
+        )
+        .unwrap();
+        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let first = sync.advancements.first_tick(
+            &sync,
+            0,
+            &mut Progress::default(),
+            &mut Settings::default(),
+        );
+        let mut r = Reader::new(&first.update_advancements);
+        let p = <horizon_protocol::packets::play::UpdateAdvancements as horizon_protocol::buf::Codec<_>>::read(&mut r)
+            .unwrap();
+        assert_eq!(r.remaining(), 0);
+        let display = p.added[0].display.as_ref().unwrap();
+        assert_eq!(display.icon, Stack::new(sync.id("minecraft:item", "minecraft:furnace").unwrap(), 1));
+        assert_eq!((display.x, display.y), (0.0, 0.0));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn smelting_reaches_the_furnace_book() {
         let root = resources(
@@ -683,7 +740,8 @@ mod tests {
         };
         assert_eq!(
             ingredient,
-            SlotDisplay::Tag(HolderSet::Items(vec![item("minecraft:raw_copper")]))
+            // Ingredient.display: a composite of each item's display.
+            SlotDisplay::Composite(vec![SlotDisplay::Item(item("minecraft:raw_copper"))])
         );
         assert_eq!(fuel, SlotDisplay::AnyFuel);
         assert_eq!(
@@ -730,7 +788,8 @@ mod tests {
         };
         assert_eq!(
             ingredient,
-            SlotDisplay::Tag(HolderSet::Items(vec![item("minecraft:redstone_ore")]))
+            // Ingredient.display: a composite of each item's display.
+            SlotDisplay::Composite(vec![SlotDisplay::Item(item("minecraft:redstone_ore"))])
         );
         assert_eq!(station, SlotDisplay::Item(item("minecraft:blast_furnace")));
         assert_eq!(duration, 200);

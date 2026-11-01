@@ -233,7 +233,6 @@ impl Paletted {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Section {
     pub non_empty: i16,
-    pub fluids: i16,
     pub states: Paletted,
     pub biomes: Paletted,
 }
@@ -241,14 +240,12 @@ impl Section {
     pub fn read(r: &mut Reader, block_bits: u8, biome_bits: u8) -> Result<Self> {
         Ok(Self {
             non_empty: r.i16()?,
-            fluids: r.i16()?,
             states: Paletted::read(r, Strategy::Blocks, block_bits)?,
             biomes: Paletted::read(r, Strategy::Biomes, biome_bits)?,
         })
     }
     pub fn write(&self, w: &mut Writer) {
         w.i16(self.non_empty);
-        w.i16(self.fluids);
         self.states.write(w);
         self.biomes.write(w);
     }
@@ -455,13 +452,11 @@ mod tests {
         }
         let section = Section {
             non_empty: 256,
-            fluids: 0,
             states: Paletted::from_values(&states, Strategy::Blocks, 16),
             biomes: Paletted::from_values(&[2; BIOMES], Strategy::Biomes, 7),
         };
         let empty = Section {
             non_empty: 0,
-            fluids: 0,
             states: Paletted::from_values(&[0; BLOCKS], Strategy::Blocks, 16),
             biomes: Paletted::from_values(&[2; BIOMES], Strategy::Biomes, 7),
         };
@@ -483,6 +478,22 @@ mod tests {
         assert_eq!(sections, vec![section, empty]);
         assert_eq!(sections[0].states.get(4), 2);
         assert_eq!(sections[1].states.get(4), 0);
+    }
+
+    /// 1.21.11's LevelChunkSection.write: the block count, then the states
+    /// and the biomes, with no fluid count between.
+    #[test]
+    fn a_section_has_no_fluid_count() {
+        let section = Section {
+            non_empty: 0x0102,
+            states: Paletted::from_values(&[0; BLOCKS], Strategy::Blocks, 16),
+            biomes: Paletted::from_values(&[2; BIOMES], Strategy::Biomes, 7),
+        };
+        let mut w = Writer::new();
+        section.write(&mut w);
+        // Single-value containers: bits 0, the value, no data longs.
+        assert_eq!(w.data, [1, 2, 0, 0, 0, 2]);
+        assert_eq!(Section::read(&mut Reader::new(&w.data), 16, 7).unwrap(), section);
     }
 
     #[test]

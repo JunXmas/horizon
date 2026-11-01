@@ -4,7 +4,7 @@
 //! goes as its persistent Codec's NBT, `ByteBufCodecs.fromCodecWithRegistries`).
 //! Item data has no length prefix, so a component read short or long makes
 //! everything after it unreadable.
-use super::{Component, Template};
+use super::{Component, NonEmpty};
 use crate::{
     Error, Result,
     buf::{Codec, Reader},
@@ -12,24 +12,28 @@ use crate::{
 
 type Read = fn(&mut Reader) -> Result<()>;
 
-/// DataComponents' registry order (26.3) for the ids `Component::read`
+/// DataComponents' registry order (1.21.11) for the ids `Component::read`
 /// doesn't decode itself.
 pub(super) fn component(kind: i32, r: &mut Reader) -> Result<()> {
     match kind {
-        // Unit.STREAM_CODEC: glider, waxed.
-        34 | 120 => Ok(()),
+        // Unit.STREAM_CODEC: glider.
+        34 => Ok(()),
         // Components without a network codec go as their NBT: intangible_projectile,
         // map_decorations, debug_stick_state, recipes, lock, container_loot.
-        22 | 49 | 59 | 68 | 81 | 82 => nbt(r),
-        // A VarInt (VAR_INT, an idMapper, a registry or holderRegistry id): damage_type,
-        // enchantable, additional_trade_cost, block_transformer, villager_food, dye,
-        // ominous_bottle_amplifier, base_color, the mob variants and colours, the pottery
-        // pattern and cushion_color.
-        8 | 31 | 42 | 43 | 44 | 46 | 65 | 75 | 88..=108 | 110..=117 | 121 => varint(r),
+        22 | 45 | 55 | 64 | 76 | 77 => nbt(r),
+        // A VarInt (VAR_INT, an idMapper, a registry or holderRegistry id): enchantable,
+        // ominous_bottle_amplifier, base_color, the mob variants and colours.
+        31 | 61 | 71 | 79..=92 | 95 | 96 | 98..=103 => varint(r),
+        // EitherHolder of a holderRegistry: damage_type, chicken/variant,
+        // zombie_nautilus/variant.
+        8 | 93 | 94 => either_key(r, varint),
         // FLOAT: minimum_attack_charge, potion_duration_scale.
-        7 | 54 => f32(r),
-        // Identifier.STREAM_CODEC: tooltip_style, note_block_sound.
-        35 | 73 => ident(r),
+        7 | 50 => f32(r),
+        // INT: map_color.
+        43 => i32(r),
+        // Identifier.STREAM_CODEC: tooltip_style, note_block_sound. TagKey.streamCodec:
+        // damage_resistant, provides_banner_patterns.
+        35 | 69 | 27 | 63 => ident(r),
         // UseEffects: canSprint, interactVibrations, speedMultiplier.
         5 => {
             r.bool()?;
@@ -53,15 +57,15 @@ pub(super) fn component(kind: i32, r: &mut Reader) -> Result<()> {
             boolean(r)?;
             list(r, consume_effect)
         }
-        // UseRemainder, SulfurCubeContent: one template.
-        25 | 80 => template(r),
+        // UseRemainder: one stack (ItemStack.STREAM_CODEC).
+        25 => stack(r),
         // UseCooldown: seconds, cooldownGroup.
         26 => {
             f32(r)?;
             optional(r, ident)
         }
-        // DamageResistant, Repairable, provides_banner_patterns: a holder set.
-        27 | 33 | 67 => holder_set(r),
+        // Repairable: a holder set.
+        33 => holder_set(r),
         28 => tool(r),
         // Weapon: itemDamagePerAttack, disableBlockingForSeconds.
         29 => {
@@ -81,19 +85,19 @@ pub(super) fn component(kind: i32, r: &mut Reader) -> Result<()> {
         }
         39 => kinetic_weapon(r),
         // SwingAnimation: type, duration.
-        40 | 41 => {
+        40 => {
             varint(r)?;
             varint(r)
         }
-        // BundleContents: templates.
-        52 => list(r, template),
+        // ChargedProjectiles, BundleContents: stacks.
+        47 | 48 => list(r, stack),
         // SuspiciousStewEffects: effect, duration.
-        55 => list(r, |r| {
+        51 => list(r, |r| {
             varint(r)?;
             varint(r)
         }),
         // ArmorTrim: material, then Holder<TrimPattern> (assetId, description, decal).
-        58 => {
+        54 => {
             trim_material(r)?;
             holder(r, |r| {
                 ident(r)?;
@@ -102,96 +106,88 @@ pub(super) fn component(kind: i32, r: &mut Reader) -> Result<()> {
             })
         }
         // TypedEntityData (entity_data, block_entity_data): the type id, then a compound.
-        60 | 62 => {
+        56 | 58 => {
             varint(r)?;
             nbt(r)
         }
         // CustomData: bucket_entity_data.
-        61 => nbt(r),
-        // InstrumentComponent: Holder<Instrument> (soundEvent, useDuration, range,
-        // durabilityDamage, description).
-        63 => holder(r, |r| {
-            sound(r)?;
-            f32(r)?;
-            f32(r)?;
-            varint(r)?;
-            nbt(r)
+        57 => nbt(r),
+        // InstrumentComponent: EitherHolder of Holder<Instrument> (soundEvent,
+        // useDuration, range, description).
+        59 => either_key(r, |r| {
+            holder(r, |r| {
+                sound(r)?;
+                f32(r)?;
+                f32(r)?;
+                nbt(r)
+            })
         }),
-        64 => trim_material(r),
-        // JukeboxPlayable: Holder<JukeboxSong> (soundEvent, description, lengthInSeconds,
-        // comparatorOutput).
-        66 => holder(r, |r| {
-            sound(r)?;
-            nbt(r)?;
-            f32(r)?;
-            varint(r)
+        // ProvidesTrimMaterial: EitherHolder of Holder<TrimMaterial>.
+        60 => either_key(r, trim_material),
+        // JukeboxPlayable: EitherHolder of Holder<JukeboxSong> (soundEvent,
+        // description, lengthInSeconds, comparatorOutput).
+        62 => either_key(r, |r| {
+            holder(r, |r| {
+                sound(r)?;
+                nbt(r)?;
+                f32(r)?;
+                varint(r)
+            })
         }),
         // LodestoneTracker: target (GlobalPos: dimension, BlockPos), tracked.
-        69 => {
+        65 => {
             optional(r, |r| {
                 ident(r)?;
                 r.i64().map(drop)
             })?;
             boolean(r)
         }
-        70 => firework_explosion(r),
+        66 => firework_explosion(r),
         // Fireworks: flightDuration, explosions.
-        71 => {
+        67 => {
             varint(r)?;
             list(r, firework_explosion)
         }
         // BannerPatternLayers: Holder<BannerPattern> (assetId, translationKey), colour.
-        74 => list(r, |r| {
+        70 => list(r, |r| {
             holder(r, |r| {
                 ident(r)?;
                 string(r)
             })?;
             varint(r)
         }),
-        // PotDecorations: back, left, right, front.
-        76 => (0..4).try_for_each(|_| optional(r, template)),
-        // ItemContainerContents: optional templates.
-        77 => list(r, |r| optional(r, template)),
+        // PotDecorations: up to four item ids (back, left, right, front).
+        72 => {
+            let n = r.count(4)?;
+            (0..n).try_for_each(|_| varint(r))
+        }
+        // ItemContainerContents: up to 256 optional stacks (count 0 is empty).
+        73 => {
+            let n = r.count(256)?;
+            (0..n).try_for_each(|_| super::Slot::read(r).map(drop))
+        }
         // BlockItemStateProperties: a string to string map.
-        78 => list(r, |r| {
+        74 => list(r, |r| {
             string(r)?;
             string(r)
         }),
         // Bees: Occupant (entity type and data, ticksInHive, minTicksInHive).
-        79 => list(r, |r| {
+        75 => list(r, |r| {
             varint(r)?;
             nbt(r)?;
             varint(r)?;
             varint(r)
         }),
-        83 => sound(r),
-        // Compostable: layers.
-        84 => resolvable(r, i32),
-        // CookingFuel (burnTime, speedMultiplier), BrewingFuel (uses, speedMultiplier).
-        85 | 86 => {
-            resolvable(r, i32)?;
-            resolvable(r, f32)
-        }
-        // MobVisibility: targetingEntityTypes, visibility.
-        87 => {
-            holder_set(r)?;
-            f32(r)
-        }
+        // break_sound.
+        78 => sound(r),
         // Holder<PaintingVariant>: width, height, assetId, title, author.
-        109 => holder(r, |r| {
+        97 => holder(r, |r| {
             varint(r)?;
             varint(r)?;
             ident(r)?;
             optional(r, nbt)?;
             optional(r, nbt)
         }),
-        // SignText: four messages, four optional filtered ones, colour, hasGlowingText.
-        118 | 119 => {
-            (0..4).try_for_each(|_| nbt(r))?;
-            optional(r, |r| (0..4).try_for_each(|_| nbt(r)))?;
-            varint(r)?;
-            boolean(r)
-        }
         other => Err(Error::new(format!("unsupported item component {other}"))),
     }
 }
@@ -220,8 +216,14 @@ fn ident(r: &mut Reader) -> Result<()> {
 fn nbt(r: &mut Reader) -> Result<()> {
     r.nbt().map(drop)
 }
-fn template(r: &mut Reader) -> Result<()> {
-    Template::read(r).map(drop)
+/// ItemStack.STREAM_CODEC: a non-empty stack, count first.
+fn stack(r: &mut Reader) -> Result<()> {
+    NonEmpty::read(r).map(drop)
+}
+/// EitherHolder.streamCodec: `true` and the holder, or `false` and a
+/// ResourceKey (an identifier).
+fn either_key(r: &mut Reader, holder: Read) -> Result<()> {
+    if r.bool()? { holder(r) } else { ident(r) }
 }
 /// ByteBufCodecs.optional: a flag, then the value.
 fn optional(r: &mut Reader, value: Read) -> Result<()> {
@@ -258,14 +260,15 @@ fn sound(r: &mut Reader) -> Result<()> {
         optional(r, f32)
     })
 }
-/// ResolvableInt, ResolvableFloat: Either a constant (true) or a context provider's key.
-fn resolvable(r: &mut Reader, constant: Read) -> Result<()> {
-    if r.bool()? { constant(r) } else { ident(r) }
-}
-/// TrimMaterial.STREAM_CODEC: a holder of a palette id and a description.
+/// TrimMaterial.STREAM_CODEC: a holder of MaterialAssetGroup (a base asset
+/// suffix and an equipment-asset to suffix map) and a description.
 fn trim_material(r: &mut Reader) -> Result<()> {
     holder(r, |r| {
-        ident(r)?;
+        string(r)?;
+        list(r, |r| {
+            ident(r)?;
+            string(r)
+        })?;
         nbt(r)
     })
 }
@@ -296,11 +299,8 @@ fn consume_effect(r: &mut Reader) -> Result<()> {
         1 => holder_set(r),
         // clear_all_effects.
         2 => Ok(()),
-        // teleport_randomly: diameter, directionalParticles.
-        3 => {
-            f32(r)?;
-            boolean(r)
-        }
+        // teleport_randomly: diameter.
+        3 => f32(r),
         // play_sound.
         4 => sound(r),
         other => Err(Error::new(format!("unknown consume effect type {other}"))),
@@ -387,7 +387,8 @@ fn blocks_attacks(r: &mut Reader) -> Result<()> {
         f32(r)
     })?;
     (0..3).try_for_each(|_| f32(r))?;
-    optional(r, holder_set)?;
+    // bypassedBy: a damage type tag.
+    optional(r, ident)?;
     optional(r, sound)?;
     optional(r, sound)
 }

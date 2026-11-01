@@ -5,7 +5,7 @@
 //! `SetCreativeModeSlot`. The other direction is `lan::guest::stack_to_network`.
 use crate::items::ItemStack;
 use horizon_protocol::buf::{Codec, Reader};
-use horizon_protocol::item::{Component, Profile, Stack, Template, component};
+use horizon_protocol::item::{Component, Profile, Slot, Stack, component};
 use horizon_protocol::registry::{Builtin, Dynamic};
 use horizon_world::nbt::Tag;
 use std::sync::Arc;
@@ -212,7 +212,7 @@ fn components_tag(s: &Stack, builtin: &Builtin, synced: &Dynamic) -> Option<Tag>
                         .chain(color.map(|c| ("custom_color", Tag::Int(c)))),
                 )
             }
-            // ItemStackTemplate.CODEC: id, count and components.
+            // ItemStack.CODEC: id, count and components.
             Component::Stacks(stacks) => Tag::List(
                 stacks
                     .iter()
@@ -262,7 +262,7 @@ fn components_tag(s: &Stack, builtin: &Builtin, synced: &Dynamic) -> Option<Tag>
     Some(Tag::compound(entries))
 }
 
-/// An `ItemStackTemplate` as its NBT codec writes it: id, count and components.
+/// An `ItemStack` as its NBT codec writes it: id, count and components.
 fn template_tag(t: &Stack, builtin: &Builtin, synced: &Dynamic) -> Tag {
     let mut entries = vec![
         (
@@ -290,14 +290,13 @@ fn block_entity_data_tag(bytes: &[u8], builtin: &Builtin) -> Option<Tag> {
     Some(Tag::Compound(data))
 }
 
-/// `ItemContainerContents.STREAM_CODEC`, one optional template per slot, as
+/// `ItemContainerContents.STREAM_CODEC`, one optional stack per slot, as
 /// the saved `container` lists the slots that hold one.
 fn container_tag(bytes: &[u8], builtin: &Builtin, synced: &Dynamic) -> Option<Tag> {
     let mut r = Reader::new(bytes);
     let mut slots = Vec::new();
     for slot in 0..r.count(256).ok()? {
-        if r.bool().ok()? {
-            let stack = Template::read(&mut r).ok()?;
+        if let Some(stack) = Slot::read(&mut r).ok()? {
             slots.push(Tag::compound([
                 ("slot", Tag::Int(slot as i32)),
                 ("item", template_tag(&stack, builtin, synced)),
@@ -690,15 +689,15 @@ mod tests {
         );
     }
 
-    /// A painting's `painting/variant` (a `painting_variant` holder, id 109)
+    /// A painting's `painting/variant` (a `painting_variant` holder, id 97)
     /// crosses the wire both ways: a server's creative slot gets the variant
     /// its client picked, and a client's tooltip names the server's.
     #[test]
     fn a_painting_keeps_its_variant_across_the_wire() {
         use horizon_protocol::buf::{Codec, Reader, Writer};
         use horizon_protocol::item::Slot;
-        let mut components = vec![String::new(); 110];
-        components[109] = "minecraft:painting/variant".into();
+        let mut components = vec![String::new(); 98];
+        components[97] = "minecraft:painting/variant".into();
         let items = ["minecraft:air", "minecraft:painting"];
         let builtin = Builtin {
             registries: [
@@ -723,8 +722,8 @@ mod tests {
             ..Default::default()
         };
         // ItemStack.OPTIONAL_STREAM_CODEC: count 1, the painting, one added
-        // component (109: the reference to kebab, its id plus one), none removed.
-        let vanilla = [1u8, 1, 1, 0, 109, 2];
+        // component (97: the reference to kebab, its id plus one), none removed.
+        let vanilla = [1u8, 1, 1, 0, 97, 2];
         let stack = Slot::read(&mut Reader::new(&vanilla)).unwrap().unwrap();
         let back = from_network(&stack, &builtin, &dynamic);
         let variant = |s: &ItemStack| {
@@ -745,7 +744,7 @@ mod tests {
         );
         let mut w = Writer::new();
         Slot::write(&wire, &mut w);
-        assert_eq!(w.data, [1, 1, 1, 0, 109, 1]);
+        assert_eq!(w.data, [1, 1, 1, 0, 97, 1]);
         let wire = Slot::read(&mut Reader::new(&w.data)).unwrap().unwrap();
         assert_eq!(
             variant(&from_network(&wire, &builtin, &dynamic)),

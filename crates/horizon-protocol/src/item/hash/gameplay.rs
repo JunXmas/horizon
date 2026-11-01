@@ -163,21 +163,12 @@ fn consume_effect(r: &mut Reader, names: &dyn Names) -> Option<HashCode> {
                 .field("type", string("minecraft:remove_effects"))
                 .field("effects", holder_set("minecraft:mob_effect", names, r)?),
             2 => rec.field("type", string("minecraft:clear_all_effects")),
-            3 => {
-                let diameter = float(r)?;
-                let particles = boolean(r)?;
-                bool_or(
-                    float_or(
-                        rec.field("type", string("minecraft:teleport_randomly")),
-                        "diameter",
-                        diameter,
-                        16.0,
-                    ),
-                    "directional_particles",
-                    particles,
-                    true,
-                )
-            }
+            3 => float_or(
+                rec.field("type", string("minecraft:teleport_randomly")),
+                "diameter",
+                float(r)?,
+                16.0,
+            ),
             4 => rec
                 .field("type", string("minecraft:play_sound"))
                 .field("sound", sound(r, names)?.code),
@@ -195,15 +186,9 @@ fn swing(r: &mut Reader) -> Option<HashCode> {
     Some(int_or(rec, "duration", duration, 6).build())
 }
 
-/// `ResolvableInt` / `ResolvableFloat`: a constant, or a context provider's key.
-fn resolvable(r: &mut Reader, constant: fn(&mut Reader) -> Option<HashCode>) -> Option<HashCode> {
-    if boolean(r)? { constant(r) } else { ident(r) }
-}
-fn fixed_int(r: &mut Reader) -> Option<HashCode> {
-    Some(HashOps::create_int(r.i32().ok()?))
-}
-fn fixed_float(r: &mut Reader) -> Option<HashCode> {
-    Some(HashOps::create_f32(float(r)?))
+/// `TagKey.streamCodec` (an identifier) as `TagKey.hashedCodec` writes it.
+fn tag(r: &mut Reader) -> Option<HashCode> {
+    Some(string(&format!("#{}", r.string(32767).ok()?)))
 }
 
 /// `KineticWeapon.Condition`.
@@ -398,10 +383,9 @@ pub(super) fn code(kind: i32, r: &mut Reader, names: &dyn Names) -> Option<HashC
                 .optional("cooldown_group", optional(r, ident)?)
                 .build()
         }
-        // DamageResistant, Repairable: a holder set.
-        27 => RecordHash::new()
-            .field("types", holder_set("minecraft:damage_type", names, r)?)
-            .build(),
+        // DamageResistant: a damage type tag (`TagKey.hashedCodec`: `#tag`).
+        27 => RecordHash::new().field("types", tag(r)?).build(),
+        // Repairable: a holder set.
         33 => RecordHash::new()
             .field("items", holder_set("minecraft:item", names, r)?)
             .build(),
@@ -496,7 +480,7 @@ pub(super) fn code(kind: i32, r: &mut Reader, names: &dyn Names) -> Option<HashC
                 Some((angle, types, base, factor))
             })?;
             let item = [float(r)?, float(r)?, float(r)?];
-            let bypassed = optional(r, |r| holder_set("minecraft:damage_type", names, r))?;
+            let bypassed = optional(r, tag)?;
             let block = optional(r, |r| sound(r, names))?;
             let disabled = optional(r, |r| sound(r, names))?;
             let rec = float_or(RecordHash::new(), "block_delay_seconds", delay, 0.0);
@@ -574,35 +558,24 @@ pub(super) fn code(kind: i32, r: &mut Reader, names: &dyn Names) -> Option<HashC
                 .optional("hit_sound", hit.map(|s| s.code))
                 .build()
         }
-        40 | 41 => swing(r)?,
-        // `JukeboxSong.CODEC` is a `RegistryFixedCodec`: a direct song cannot be
-        // encoded (vanilla's client would throw), so only a reference hashes.
-        66 => match int(r)? {
-            0 => return None,
-            id => entry(names, "minecraft:jukebox_song", id - 1)?,
-        },
-        67 => holder_set("minecraft:banner_pattern", names, r)?,
-        83 => sound(r, names)?.code,
-        84 => RecordHash::new()
-            .field("layers", resolvable(r, fixed_int)?)
-            .build(),
-        // CookingFuel (burnTime, speedMultiplier), BrewingFuel (uses, speedMultiplier).
-        85 | 86 => {
-            let first = resolvable(r, fixed_int)?;
-            let speed = resolvable(r, fixed_float)?;
-            RecordHash::new()
-                .field(if kind == 85 { "burn_time" } else { "uses" }, first)
-                .field("speed_multiplier", speed)
-                .build()
+        40 => swing(r)?,
+        // JukeboxPlayable: an `EitherHolder` (a holder, or a key). `JukeboxSong.CODEC`
+        // is a `RegistryFixedCodec`: a direct song cannot be encoded (vanilla's
+        // client would throw), so only a reference or a key hashes.
+        62 => {
+            if boolean(r)? {
+                match int(r)? {
+                    0 => return None,
+                    id => entry(names, "minecraft:jukebox_song", id - 1)?,
+                }
+            } else {
+                ident(r)?
+            }
         }
-        // MobVisibility: targetingEntityTypes, visibility.
-        87 => {
-            let types = holder_set("minecraft:entity_type", names, r)?;
-            RecordHash::new()
-                .field("targeting_entity_types", types)
-                .field("visibility", HashOps::create_f32(float(r)?))
-                .build()
-        }
+        // provides_banner_patterns: a banner pattern tag.
+        63 => tag(r)?,
+        // break_sound.
+        78 => sound(r, names)?.code,
         // AdventureModePredicate (can_place_on, can_break): `compactListCodec`
         // writes one predicate as itself and `nonEmptyList` refuses none.
         14 | 15 => {
@@ -613,8 +586,8 @@ pub(super) fn code(kind: i32, r: &mut Reader, names: &dyn Names) -> Option<HashC
                 _ => HashOps::create_list(predicates),
             }
         }
-        // UseRemainder: one template.
-        25 => super::raw::template_code(r, names)?,
+        // UseRemainder: one stack.
+        25 => super::raw::stack_code(r, names)?,
         _ => return None,
     })
 }

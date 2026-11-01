@@ -50,6 +50,8 @@ pub enum Event {
         registries: Arc<Dynamic>,
         uuid: u128,
         name: String,
+        /// The login encrypted the connection (an online-mode server).
+        encrypted: bool,
     },
     Packet(Box<play::Clientbound>),
     /// A packet that failed to decode (skipped, like vanilla's skippable packets).
@@ -484,6 +486,7 @@ fn run(
         .encode(),
     )
     .map_err(e)?;
+    let mut encrypted = false;
     let profile = loop {
         let (id, payload) = c.recv().map_err(e)?;
         match login::Clientbound::decode(id, &payload).map_err(e)? {
@@ -528,6 +531,7 @@ fn run(
                 )
                 .map_err(e)?;
                 c.enable_encryption(&secret);
+                encrypted = true;
             }
             login::Clientbound::CustomQuery(q) => {
                 c.send(
@@ -581,6 +585,7 @@ fn run(
         registries: Arc::new(registries),
         uuid: profile.uuid,
         name: profile.name,
+        encrypted,
     });
     receive_play(
         &mut reader,

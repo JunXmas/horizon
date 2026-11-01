@@ -148,11 +148,13 @@ fn enchantments(list: &[(i32, i32)], names: &dyn Names) -> Option<HashCode> {
     }
     Some(HashOps::create_map(entries))
 }
-/// `ItemStackTemplate.CODEC` (the map form): the item, a count that is absent
-/// at 1 and a `DataComponentPatch.CODEC` that is absent when empty.
-fn template(s: &Stack, names: &dyn Names) -> Option<HashCode> {
-    let rec = RecordHash::new().field("id", entry(names, "minecraft:item", s.item)?);
-    let rec = or_default(rec, "count", s.count, 1, HashOps::create_int(s.count));
+/// `ItemStack.CODEC` (the map form): the item, the count (`orElse(1)` only
+/// reads a missing one as 1, so it is always written) and a
+/// `DataComponentPatch.CODEC` that is absent when empty.
+fn stack_hash(s: &Stack, names: &dyn Names) -> Option<HashCode> {
+    let rec = RecordHash::new()
+        .field("id", entry(names, "minecraft:item", s.item)?)
+        .field("count", HashOps::create_int(s.count));
     let mut patch = Vec::new();
     for (k, c) in &s.added {
         patch.push((
@@ -341,7 +343,7 @@ impl Component {
             Self::Stacks(stacks) => {
                 let mut list = Vec::with_capacity(stacks.len());
                 for s in stacks {
-                    list.push(template(s, names)?);
+                    list.push(stack_hash(s, names)?);
                 }
                 HashOps::create_list(list)
             }
@@ -781,7 +783,8 @@ mod tests {
                 "charged",
                 k::CHARGED_PROJECTILES,
                 C::Stacks(vec![Stack::new(0, 1), fireworks_template.clone()]),
-                -1839603258,
+                // 1.21.11's ItemStack.CODEC writes a count of 1 too.
+                1454313573,
             ),
             (
                 "bundle",
@@ -803,8 +806,8 @@ mod tests {
             C::Enchantments(vec![(9, 1)]).hash(k::ENCHANTMENTS, &Table),
             None
         );
-        // additional_trade_cost has no persistent codec either.
-        assert_eq!(C::Raw(vec![1]).hash(42, &Table), None);
+        // Neither has recipes (64) a stream codec of its own: its NBT is cut short.
+        assert_eq!(C::Raw(vec![1]).hash(64, &Table), None);
         assert_eq!(C::Unit.hash(k::CREATIVE_SLOT_LOCK, &Table), None);
         assert_eq!(C::Int(0).hash(k::MAP_POST_PROCESSING, &Table), None);
         // Custom effects cut short.
@@ -820,7 +823,7 @@ mod tests {
     fn a_hashed_stack_carries_each_hashable_component_and_the_removed_ones() {
         let mut stack = Stack::new(1, 2);
         stack.added.push((k::DAMAGE, C::Int(5)));
-        stack.added.push((42, C::Raw(vec![0])));
+        stack.added.push((k::MAP_POST_PROCESSING, C::Raw(vec![0])));
         stack.removed.push(k::RARITY);
         assert_eq!(
             Hashed::create(&stack, &Table),

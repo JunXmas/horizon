@@ -489,7 +489,8 @@ impl Game<'_> {
         let pitch = (1.0
             + (super::explosion::client_float() - super::explosion::client_float()) * 0.2)
             * 0.7;
-        self.audio.play(sound, Some(center), 4.0, pitch);
+        // The guests play it from the explode packet (1.21.11's handleExplosion).
+        self.audio.play_unshared(sound, Some(center), 4.0, pitch);
         // Explosion.isSmall: below a radius of 2.
         let ty = if radius < 2.0 {
             ParticleType::GustEmitterSmall

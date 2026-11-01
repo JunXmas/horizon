@@ -236,14 +236,11 @@ impl SectionCoder {
 
     fn section(&self, section: &Section) -> (horizon_protocol::chunk::Section, Vec<(u16, u32)>) {
         let mut values = Vec::with_capacity(BLOCKS);
-        let (mut non_empty, mut fluids, mut entities) = (0i16, 0i16, Vec::new());
+        let (mut non_empty, mut entities) = (0i16, Vec::new());
         let mut count = |state: u32, n: i16| {
             let f = self.flags.get(state as usize).copied().unwrap_or(0);
             if f & NON_AIR != 0 {
                 non_empty += n;
-                if f & FLUID != 0 {
-                    fluids += n;
-                }
             }
             f & ENTITY != 0
         };
@@ -266,7 +263,6 @@ impl SectionCoder {
         (
             horizon_protocol::chunk::Section {
                 non_empty,
-                fluids,
                 states: match uniform {
                     Some(v) => Paletted {
                         bits: 0,

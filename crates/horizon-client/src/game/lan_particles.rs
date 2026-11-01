@@ -67,9 +67,8 @@ pub(super) fn send_soul_particle(host: &super::lan::LanHost, at: [f64; 3], veloc
         always_show: false,
         pos: at,
         dist: velocity.map(|v| v as f32),
-        max_speed: [1.0; 3],
+        max_speed: 1.0,
         count: 0,
-        randomization: 0,
     });
     for g in host.hub.guests.iter().filter(|g| host.hub.here(g)) {
         let distance: f64 = (0..3)
@@ -94,9 +93,8 @@ impl Game<'_> {
             always_show: false,
             pos: at,
             dist: [0.0; 3],
-            max_speed: [0.0; 3],
+            max_speed: 0.0,
             count: 0,
-            randomization: 0,
         });
         for g in host.hub.guests.iter().filter(|g| host.hub.here(g)) {
             // ServerLevel compares the player's block centre, strictly within 32.
@@ -131,9 +129,8 @@ impl Game<'_> {
             always_show: false,
             pos: at,
             dist: spread.map(|d| d as f32),
-            max_speed: [speed as f32; 3],
+            max_speed: speed as f32,
             count: count as i32,
-            randomization: 0,
         });
         for g in host.hub.guests.iter().filter(|g| host.hub.here(g)) {
             // ServerLevel compares the player's block centre, strictly within 32.
@@ -191,9 +188,8 @@ impl Game<'_> {
             always_show: false,
             pos: at,
             dist: [0.0; 3],
-            max_speed: [speed as f32; 3],
+            max_speed: speed as f32,
             count,
-            randomization: 0,
         });
         for g in hub.guests.iter().filter(|g| hub.here(g)) {
             // ServerLevel compares the player's block centre, strictly within 32.
@@ -247,11 +243,6 @@ impl Game<'_> {
             )),
             T::DragonBreath | T::SculkCharge => Some(ParticleData::Scalar(options.scale)),
             T::Shriek => Some(ParticleData::Delay(options.scale as i32)),
-            T::Geyser | T::GeyserPlume => Some(ParticleData::Geyser(options.geyser?.0)),
-            T::GeyserBase | T::GeyserPoof => {
-                let (water_blocks, burst_impulse_base) = options.geyser?;
-                Some(ParticleData::GeyserBase(water_blocks, burst_impulse_base))
-            }
             T::Item | T::Trail | T::Vibration => return None,
             _ => None,
         };
@@ -301,10 +292,6 @@ impl Game<'_> {
                 ..ParticleOptions::simple(ty)
             },
             Some(ParticleData::Delay(d)) => ParticleOptions::shriek(*d),
-            Some(ParticleData::Geyser(water_blocks)) => ParticleOptions::geyser(ty, *water_blocks),
-            Some(ParticleData::GeyserBase(water_blocks, burst_impulse_base)) => {
-                ParticleOptions::geyser_base(ty, *water_blocks, *burst_impulse_base)
-            }
             Some(ParticleData::Trail(target, color, duration)) => {
                 ParticleOptions::trail(*target, *color as u32 & 0xFF_FFFF, *duration)
             }
@@ -319,7 +306,7 @@ impl Game<'_> {
         let Some(options) = self.received_particle(&p.particle, p.pos) else {
             return;
         };
-        let (d, s) = (p.dist.map(f64::from), p.max_speed.map(f64::from));
+        let (d, s) = (p.dist.map(f64::from), f64::from(p.max_speed));
         // ClientLevel.addParticle: the camera's 32 blocks and the Particles
         // option, unless the packet or the type overrides the limiter.
         let add = |particles: &mut horizon_client::particles::ParticleEngine, at, v| {
@@ -329,7 +316,7 @@ impl Game<'_> {
             add(
                 &mut self.particles,
                 p.pos,
-                [s[0] * d[0], s[1] * d[1], s[2] * d[2]],
+                [s * d[0], s * d[1], s * d[2]],
             );
             return;
         }
@@ -341,29 +328,26 @@ impl Game<'_> {
                 p.pos[2] + r.next_gaussian() * d[2],
             ];
             let v = [
-                r.next_gaussian() * s[0],
-                r.next_gaussian() * s[1],
-                r.next_gaussian() * s[2],
+                r.next_gaussian() * s,
+                r.next_gaussian() * s,
+                r.next_gaussian() * s,
             ];
             add(&mut self.particles, at, v);
         }
     }
 
-    /// `ClientPacketListener.handleExplosion`: the blast's particles (and its
-    /// sound, when the packet carries it), then the player's push.
+    /// `ClientPacketListener.handleExplosion`: the blast's sound, its
+    /// particles, then the player's push.
     pub(super) fn remote_explode(&mut self, p: &play::Explode) {
-        if p.play_sound {
-            let pitch = (1.0
-                + (self.particles.random().next_float() - self.particles.random().next_float())
-                    * 0.2)
-                * 0.7;
-            // The packet's explosionSound: a wind charge's burst, a bed's
-            // or anchor's blast, a modded sound.
-            let sound = self
-                .remote_sound_name(&p.sound)
-                .unwrap_or_else(|| "minecraft:entity.generic.explode".to_owned());
-            self.audio.play(&sound, Some(p.center), 4.0, pitch);
-        }
+        let pitch = (1.0
+            + (self.particles.random().next_float() - self.particles.random().next_float()) * 0.2)
+            * 0.7;
+        // The packet's explosionSound: a wind charge's burst, a bed's or
+        // anchor's blast, a modded sound.
+        let sound = self
+            .remote_sound_name(&p.sound)
+            .unwrap_or_else(|| "minecraft:entity.generic.explode".to_owned());
+        self.audio.play(&sound, Some(p.center), 4.0, pitch);
         if let Some(options) = self.received_particle(&p.particle, p.center) {
             self.particles.add(&options, p.center, [1.0, 0.0, 0.0]);
         }
@@ -422,9 +406,8 @@ impl Game<'_> {
             always_show: false,
             pos: at,
             dist: spread.map(|d| d as f32),
-            max_speed: [speed as f32; 3],
+            max_speed: speed as f32,
             count,
-            randomization: 0,
         })
         .encode();
         // BlockPos.closerToCenterThan(at, 32): from the centre of the
@@ -476,9 +459,8 @@ impl Game<'_> {
 
     /// `ServerLevel.explode`'s packet to each player within 64 blocks, with
     /// the push `pushed` holds for them (`ServerExplosion.hitPlayers`: a
-    /// creative player, whom nothing hurt). The sound reaches them on its own
-    /// (the level's sounds), and so does a hurt player's push (the motion
-    /// they are sent).
+    /// creative player, whom nothing hurt). They play the sound from it; a
+    /// hurt player's push reaches them as the motion they are sent.
     pub(super) fn lan_explode(
         &mut self,
         center: [f64; 3],
@@ -543,8 +525,7 @@ impl Game<'_> {
     }
 
     /// `ClientboundExplodePacket` without a push, or None while not serving.
-    /// The sound is the level's, which the players hear already, so it isn't
-    /// played from the packet.
+    /// The players play its sound from it.
     fn explosion_packet(
         &self,
         center: [f64; 3],
@@ -587,7 +568,6 @@ impl Game<'_> {
                 None => (-1, Some((sound.into(), None))),
             },
             block_particles,
-            play_sound: false,
         })
     }
 

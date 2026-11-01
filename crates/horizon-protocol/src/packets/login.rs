@@ -29,7 +29,7 @@ packet!(Hello {
     challenge: Vec<u8> => Bytes,
     should_authenticate: bool => Bool,
 });
-packet!(LoginFinished { profile: GameProfile => GameProfile, session: u128 => Uuid });
+packet!(LoginFinished { profile: GameProfile => GameProfile });
 packet!(Compression { threshold: i32 => VarInt });
 packet!(CustomQuery { transaction: i32 => VarInt, channel: String => Ident, data: Vec<u8> => Rest });
 packet!(CookieRequest { key: String => Ident });
@@ -82,10 +82,7 @@ mod tests {
                 challenge: vec![3; 4],
                 should_authenticate: true,
             }),
-            Clientbound::LoginFinished(LoginFinished {
-                profile,
-                session: 7,
-            }),
+            Clientbound::LoginFinished(LoginFinished { profile }),
             Clientbound::Compression(Compression { threshold: 256 }),
             Clientbound::CustomQuery(CustomQuery {
                 transaction: 3,
@@ -117,6 +114,25 @@ mod tests {
         ] {
             round_trip(p, Serverbound::encode, Serverbound::decode);
         }
+    }
+
+    #[test]
+    fn login_finished_is_the_bare_game_profile() {
+        // 1.21.11: GameProfile (uuid, name, properties), no session id after it.
+        let mut w = crate::buf::Writer::new();
+        <LoginFinished as crate::buf::Codec<LoginFinished>>::write(
+            &LoginFinished {
+                profile: GameProfile {
+                    uuid: 0x0102,
+                    name: "ab".into(),
+                    properties: vec![],
+                },
+            },
+            &mut w,
+        );
+        let mut want = vec![0; 14];
+        want.extend([1, 2, 2, b'a', b'b', 0]);
+        assert_eq!(w.data, want);
     }
 
     #[test]

@@ -747,11 +747,6 @@ fn read(
                     send(
                         play::Serverbound::AcceptTeleportation(play::AcceptTeleportation {
                             id: p.teleport,
-                            x: pos[0],
-                            y: pos[1],
-                            z: pos[2],
-                            yaw: p.yaw,
-                            pitch: p.pitch,
                         })
                         .encode(),
                     )
@@ -1017,7 +1012,15 @@ fn run_bot(
             && joined.elapsed().as_secs_f64() >= o.attack_after
             && tick % 10 == 0
         {
-            send(play::Serverbound::Attack(play::Attack { id }).encode());
+            // 1.21.11: an attack is ServerboundInteractPacket's ATTACK.
+            send(
+                play::Serverbound::Interact(play::Interact {
+                    id,
+                    action: play::InteractAction::Attack,
+                    secondary: false,
+                })
+                .encode(),
+            );
             bot.attacks.fetch_add(1, Ordering::Relaxed);
         }
         tick += 1;

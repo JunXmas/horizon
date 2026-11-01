@@ -366,7 +366,6 @@ mod tests {
     fn packet(x: i32, state: i32) -> Box<C> {
         let section = Wire {
             non_empty: 4096,
-            fluids: 0,
             states: Paletted::from_values(&[state; 4096], Wiring::Blocks, 16),
             biomes: Paletted::from_values(&[1; 64], Wiring::Biomes, 2),
         };

@@ -371,7 +371,8 @@ pub(super) struct Remote {
     /// The skin texture each profile's players show, once its download is ready.
     skins: HashMap<u128, String>,
     listed: std::collections::HashSet<u128>,
-    /// `ClientboundLoginPacket.onlineMode`: the player list shows heads.
+    /// The connection is encrypted (`PlayerTabOverlay`: the player list
+    /// shows heads on a local or encrypted connection).
     online_mode: bool,
     /// Player entities in the level: entity id to profile UUID.
     level_players: HashMap<i32, u128>,
@@ -422,13 +423,9 @@ pub(super) struct Remote {
     /// slot updates (`creative_sync_stacks`).
     synced: Vec<Option<ItemStack>>,
     decode_errors: u32,
-    clock: Option<i32>,
-    /// `ClientClockManager.ClientClockInstance`'s rate and partial tick for
-    /// the level's clock (its total is `world.day_time`), and
-    /// `lastTickGameTime`.
-    clock_rate: f32,
-    clock_partial: f32,
-    clock_game_time: i64,
+    /// `ClientLevel.tickDayTime`: the day time advances with the game time
+    /// (ClientboundSetTimePacket's advance_time rule).
+    tick_day_time: bool,
     /// `ClientChunkCache.Storage`'s view centre (ClientboundSetChunkCacheCenterPacket).
     chunk_center: (i32, i32),
     /// Received events a frame left for the next one, in order, and when
@@ -773,10 +770,7 @@ impl Game<'_> {
             player_type,
             synced: vec![None; CREATIVE_SYNCED],
             decode_errors: 0,
-            clock: None,
-            clock_rate: 1.0,
-            clock_partial: 0.0,
-            clock_game_time: 0,
+            tick_day_time: true,
             chunk_center: (0, 0),
             backlog: VecDeque::new(),
             backlog_since: None,
@@ -1383,6 +1377,7 @@ impl Game<'_> {
                     registries,
                     name,
                     uuid,
+                    encrypted,
                 } => {
                     self.set_registries(registries);
                     self.extras_joined();
@@ -1393,6 +1388,7 @@ impl Game<'_> {
                         // handleLogin: startWaitingForNewLevel with Reason.OTHER.
                         r.profile = uuid;
                         r.profile_name = name.clone();
+                        r.online_mode = encrypted;
                         // LevelLoadingScreen's line: no player name.
                         r.status = horizon_client::lang::get_or(
                             "multiplayer.downloadingTerrain",
@@ -2470,7 +2466,6 @@ impl Game<'_> {
                 if let Some(r) = self.remote.as_mut() {
                     r.carried = Some(0);
                     r.own_invisible = false;
-                    r.online_mode = p.online_mode;
                     r.entity_id = p.player_id;
                     // handleLogin: the new LocalPlayer is the camera.
                     r.camera = None;
@@ -2718,22 +2713,8 @@ impl Game<'_> {
                     .and_then(|r| r.entities.get(&m.id))
                     .map(|t| t.position);
                 let Some(base) = base else { return Ok(()) };
-                // VecDeltaCodec.decode: each step's position from the last.
-                let path = m.delta.as_ref().map(|d| match d {
-                    play::VecDelta::Linear(_) => Path::Linear(d.end(base)),
-                    play::VecDelta::Stepped(steps) => {
-                        let mut at = base;
-                        Path::Stepped(
-                            steps
-                                .iter()
-                                .map(|(delta, ticks)| {
-                                    at = play::VecDelta::apply(at, *delta);
-                                    (at, *ticks)
-                                })
-                                .collect(),
-                        )
-                    }
-                });
+                // VecDeltaCodec.decode against the entity's base.
+                let path = m.delta.map(|d| Path::Linear(play::apply_delta(base, d)));
                 let rotation = m.rotation.map(|(y, x)| {
                     (
                         horizon_protocol::buf::unpack_degrees(y),
@@ -2743,10 +2724,9 @@ impl Game<'_> {
                 self.move_entity(m.id, path, rotation, m.on_ground, false);
             }
             C::EntityPositionSync(p) => {
-                let path = match p.path {
-                    play::PositionPath::Linear(at) => Path::Linear(at),
-                    play::PositionPath::Stepped(steps) => Path::Stepped(steps),
-                };
+                // handleEntityPositionSync: the position (the delta movement is
+                // not applied to an entity the client does not run).
+                let path = Path::Linear(p.position);
                 self.move_entity(p.id, Some(path), Some((p.yaw, p.pitch)), p.on_ground, true)
             }
             C::TeleportEntity(p) => {
@@ -3459,42 +3439,12 @@ impl Game<'_> {
                     total: p.total,
                 }
             }
-            // ClientPacketListener.handleSetTime: the game time, then
-            // ClientClockManager.handleUpdates: the clock catches up with the
-            // game time and takes the server's state. Only this level's
-            // default world clock is applied — a packet that only updates
-            // another clock (the End's) must not overwrite day_time, or the
-            // sky follows game_time and looks inverted vs the server's day.
+            // ClientPacketListener.handleSetTime: ClientLevel.setTimeFromServer.
             C::SetTime(p) => {
                 self.world.game_time = p.game_time;
-                self.remote_clock_tick();
-                let clock = {
-                    let r = self.remote.as_ref();
-                    let names =
-                        r.and_then(|r| r.registries.registries.get("minecraft:world_clock"));
-                    let tracked = r.and_then(|r| r.clock);
-                    let wanted = r
-                        .and_then(|r| r.dimension.default_clock.clone())
-                        .or_else(|| r.map(|r| r.dimension.name.clone()))
-                        .unwrap_or_else(|| "minecraft:overworld".into());
-                    let name = |id: i32| {
-                        names
-                            .and_then(|n| n.get(id as usize))
-                            .map(|(n, _)| n.as_str())
-                    };
-                    p.clocks
-                        .iter()
-                        .find(|c| name(c.clock) == Some(wanted.as_str()))
-                        .or_else(|| tracked.and_then(|id| p.clocks.iter().find(|c| c.clock == id)))
-                        .cloned()
-                };
-                if let Some(c) = clock {
-                    self.world.day_time = c.total_ticks;
-                    if let Some(r) = self.remote.as_mut() {
-                        r.clock = Some(c.clock);
-                        r.clock_rate = c.rate;
-                        r.clock_partial = c.partial_tick;
-                    }
+                self.world.day_time = p.day_time;
+                if let Some(r) = self.remote.as_mut() {
+                    r.tick_day_time = p.tick_day_time;
                 }
             }
             C::GameEvent(p) => match p.event {
@@ -4707,13 +4657,18 @@ impl Game<'_> {
             r.destroying = None;
         }
         self.mining = None;
-        self.send(S::AcceptTeleportation(play::AcceptTeleportation {
-            id: p.teleport,
-            x: position.x,
-            y: position.y,
-            z: position.z,
-            yaw,
-            pitch,
+        // 1.21.11's handleMovePlayer: the id alone, then where the player now
+        // is (a PosRot, onGround and horizontalCollision false) — sent apart
+        // from LocalPlayer.sendPosition, whose baseline it leaves alone.
+        self.send(S::AcceptTeleportation(play::AcceptTeleportation { id: p.teleport }));
+        let at = self.player.as_ref().map_or(position, |pl| pl.position);
+        self.send(S::MovePlayerPosRot(play::MovePlayerPosRot {
+            x: at.x,
+            y: at.y,
+            z: at.z,
+            yaw: self.yaw,
+            pitch: self.pitch,
+            flags: 0,
         }));
         Ok(())
     }
@@ -4811,7 +4766,9 @@ impl Game<'_> {
         self.tick_item_activation();
         if running {
             self.world.game_time += 1;
-            self.remote_clock_tick();
+            if self.remote.as_ref().is_some_and(|r| r.tick_day_time) {
+                self.world.day_time += 1;
+            }
         }
         // Weather levels drift toward their targets between server updates.
         let w = &mut self.world.weather;
@@ -5855,7 +5812,7 @@ impl Game<'_> {
             let state = self.world.block(pos[0], pos[1], pos[2]);
             self.tutorial_destroy(state, -1.0);
             self.send(S::PlayerAction(play::PlayerAction {
-                action: 2,
+                action: play::player_action::ABORT_DESTROY_BLOCK,
                 pos,
                 direction: 0,
                 sequence: 0,
@@ -5907,7 +5864,7 @@ impl Game<'_> {
                 self.predict_break(hit.pos, state, seq);
             }
             self.send(S::PlayerAction(play::PlayerAction {
-                action: 0,
+                action: play::player_action::START_DESTROY_BLOCK,
                 pos: hit.pos,
                 direction: face,
                 sequence: seq,
@@ -5939,7 +5896,7 @@ impl Game<'_> {
                 let old_state = self.world.block(old[0], old[1], old[2]);
                 self.tutorial_destroy(old_state, -1.0);
                 self.send(S::PlayerAction(play::PlayerAction {
-                    action: 2,
+                    action: play::player_action::ABORT_DESTROY_BLOCK,
                     pos: old,
                     direction: face,
                     sequence: 0,
@@ -5947,7 +5904,7 @@ impl Game<'_> {
             }
             let seq = self.next_sequence();
             self.send(S::PlayerAction(play::PlayerAction {
-                action: 0,
+                action: play::player_action::START_DESTROY_BLOCK,
                 pos: hit.pos,
                 direction: face,
                 sequence: seq,
@@ -5977,7 +5934,7 @@ impl Game<'_> {
             });
             return;
         }
-        let Some((pos, last_face, done)) = self.remote.as_ref().and_then(|r| r.destroying) else {
+        let Some((pos, _, done)) = self.remote.as_ref().and_then(|r| r.destroying) else {
             return;
         };
         let done = done + progress;
@@ -5991,7 +5948,7 @@ impl Game<'_> {
                 self.predict_break(pos, state, seq);
             }
             self.send(S::PlayerAction(play::PlayerAction {
-                action: 3,
+                action: play::player_action::STOP_DESTROY_BLOCK,
                 pos,
                 direction: face,
                 sequence: seq,
@@ -6002,14 +5959,8 @@ impl Game<'_> {
             }
             self.mining = None;
         } else {
-            if last_face != face {
-                self.send(S::PlayerAction(play::PlayerAction {
-                    action: 1,
-                    pos,
-                    direction: face,
-                    sequence: 0,
-                }));
-            }
+            // 1.21.11's continueDestroyBlock sends nothing when the face
+            // changes (it has no CHANGE_DESTROY_DIRECTION); STOP carries it.
             if let Some(r) = self.remote.as_mut() {
                 r.destroying = Some((pos, face, done));
             }
@@ -6945,7 +6896,7 @@ impl Game<'_> {
             }
             if hit.is_none() && in_hand {
                 self.send(S::PlayerAction(play::PlayerAction {
-                    action: 6,
+                    action: play::player_action::RELEASE_USE_ITEM,
                     pos: [0; 3],
                     direction: 0,
                     sequence: 0,
@@ -7166,7 +7117,7 @@ impl Game<'_> {
             }
             // ServerboundPlayerActionPacket.Action.STAB.
             self.send(S::PlayerAction(play::PlayerAction {
-                action: 8,
+                action: play::player_action::STAB,
                 pos: [0; 3],
                 direction: 0,
                 sequence: 0,
@@ -7412,7 +7363,11 @@ impl Game<'_> {
         let dropped =
             horizon_client::items::take_held_drop(&mut self.inventory[self.selected], all, false);
         self.send(S::PlayerAction(play::PlayerAction {
-            action: if all { 4 } else { 5 },
+            action: if all {
+                play::player_action::DROP_ALL_ITEMS
+            } else {
+                play::player_action::DROP_ITEM
+            },
             pos: [0; 3],
             direction: 0,
             sequence: 0,
@@ -7426,7 +7381,7 @@ impl Game<'_> {
     /// sends both slots back; nothing is predicted.
     pub(super) fn remote_swap_hands(&mut self) {
         self.send(S::PlayerAction(play::PlayerAction {
-            action: 7,
+            action: play::player_action::SWAP_ITEM_WITH_OFFHAND,
             pos: [0; 3],
             direction: 0,
             sequence: 0,
@@ -8088,20 +8043,6 @@ impl Game<'_> {
             .filter_map(|(id, uuid)| Some((*id as u32, r.level_player_name(*id, uuid)?.to_owned())))
             .collect()
     }
-    /// `ClientClockManager.tick`: the clock moves on by the game time that
-    /// passed since its last tick, at its rate. A game time the server sets
-    /// forward (its sync every second) moves the clock with it.
-    fn remote_clock_tick(&mut self) {
-        let Some(r) = self.remote.as_mut() else {
-            return;
-        };
-        let delta = self.world.game_time - r.clock_game_time;
-        r.clock_game_time = self.world.game_time;
-        let partial = f64::from(r.clock_partial) + delta as f64 * f64::from(r.clock_rate);
-        let full = partial.floor();
-        r.clock_partial = (partial - full) as f32;
-        self.world.day_time += full as i64;
-    }
     pub(super) fn remote_status(&self) -> Option<serde_json::Value> {
         let r = self.remote.as_ref()?;
         Some(serde_json::json!({
@@ -8556,7 +8497,7 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
     }
     fn release_using(&mut self) {
         self.0.send(S::PlayerAction(play::PlayerAction {
-            action: 6,
+            action: play::player_action::RELEASE_USE_ITEM,
             pos: [0; 3],
             direction: 0,
             sequence: 0,

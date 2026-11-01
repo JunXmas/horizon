@@ -1900,6 +1900,8 @@ impl Game<'_> {
         }
         for (a, icon) in p.added.into_iter().zip(icons) {
             list.retain(|o| o.id != a.id);
+            // DisplayInfo's x, y (none without a display).
+            let at = a.display.as_ref().map_or((0.0, 0.0), |d| (d.x, d.y));
             let display = a.display.map(|d| adv::Display {
                 icon,
                 title: tag_to_json(&d.title),
@@ -1932,7 +1934,7 @@ impl Game<'_> {
                 requirements: a.requirements,
                 rewards: Default::default(),
             });
-            positions.push((a.x, a.y));
+            positions.push(at);
         }
         let mut tree = Tree::default();
         tree.list = list;

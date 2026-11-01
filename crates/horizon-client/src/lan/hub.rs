@@ -233,7 +233,6 @@ pub struct Hub {
     pub command_spam_threshold: i32,
     chat_type: i32,
     dimension_type: i32,
-    clock_ids: Vec<i32>,
     item_ids: std::collections::HashMap<Arc<str>, i32>,
     entity_types: std::collections::HashMap<String, i32>,
     /// Each level's tracked entities, by dimension.
@@ -459,7 +458,6 @@ impl Hub {
         let dimension_type = sync
             .id("minecraft:dimension_type", &config.dimension)
             .unwrap_or(0);
-        let clock_ids = (0..sync.dynamic.len("minecraft:world_clock") as i32).collect();
         let mut encoder = encoder;
         encoder.set_dimension(config.levels.get(&config.dimension));
         Self {
@@ -490,7 +488,6 @@ impl Hub {
             level_sync: Default::default(),
             chat_type,
             dimension_type,
-            clock_ids,
             item_ids: Default::default(),
             entity_types: Default::default(),
             entities: Default::default(),
@@ -877,8 +874,7 @@ impl Hub {
             show_death_screen: !self.immediate_respawn,
             limited_crafting: false,
             spawn: self.spawn_info(i, 0),
-            // MinecraftServer.usesAuthentication, enforceSecureProfile.
-            online_mode: self.lan.shared.config.online.is_some(),
+            // enforceSecureProfile.
             enforces_secure_chat: self.enforces_secure_chat(),
         }));
         g.send(&C::ChangeDifficulty(play::ChangeDifficulty {
@@ -1240,37 +1236,14 @@ impl Hub {
         }));
     }
 
-    /// ServerClockManager.createFullSyncPacket: every clock. Horizon keeps the
-    /// overworld clock (the day time); the End's clock runs with the game
-    /// time. Clocks do not advance without the advance_time rule.
+    /// ClientboundSetTimePacket (1.21.11's PlayerList.sendLevelInfo and
+    /// MinecraftServer.synchronizeTime): the game time, the day time and
+    /// whether the day advances (the advance_time rule, a running clock).
     fn time_packet(&self, world: &World, rate: f32) -> C {
-        let overworld = self
-            .sync
-            .id("minecraft:world_clock", "minecraft:overworld")
-            .unwrap_or(0);
         C::SetTime(play::SetTime {
             game_time: world.game_time,
-            clocks: self
-                .clock_ids
-                .iter()
-                .map(|&id| {
-                    if id == overworld {
-                        play::ClockState {
-                            clock: id,
-                            total_ticks: world.day_time,
-                            partial_tick: 0.0,
-                            rate,
-                        }
-                    } else {
-                        play::ClockState {
-                            clock: id,
-                            total_ticks: world.game_time,
-                            partial_tick: 0.0,
-                            rate: if rate > 0.0 { 1.0 } else { 0.0 },
-                        }
-                    }
-                })
-                .collect(),
+            day_time: world.day_time,
+            tick_day_time: rate > 0.0,
         })
     }
 
@@ -1524,34 +1497,15 @@ impl Hub {
     /// Time and weather (ServerLevel.tickTime / advanceWeatherCycle broadcasts).
     fn sync_world(&mut self, ctx: &TickCtx) {
         let world = &*ctx.world;
-        // MinecraftServer.tickServer: the game time every 20 ticks
-        // (forceGameTimeSynchronization, no clocks).
-        if self.ticks.is_multiple_of(20) {
-            self.broadcast_level(&C::SetTime(play::SetTime {
-                game_time: world.game_time,
-                clocks: Vec::new(),
-            }));
-        }
-        // ServerClockManager.modifyClock: a day that jumped (`time set`, `time
-        // add`) or a new rate updates the overworld clock.
+        // MinecraftServer.tickServer: synchronizeTime every 20 ticks, and
+        // forceTimeSynchronization when `time set`/`time add` moved the day
+        // or the advance_time rule changed.
         let (day, rate) = (world.day_time, ctx.clock_rate);
         let step = i64::from(rate.ceil() as i32).max(1);
-        if self.last_clock != i64::MIN
-            && ((day - self.last_clock).abs() > step || rate != self.last_rate)
-        {
-            let overworld = self
-                .sync
-                .id("minecraft:world_clock", "minecraft:overworld")
-                .unwrap_or(0);
-            self.broadcast_level(&C::SetTime(play::SetTime {
-                game_time: world.game_time,
-                clocks: vec![play::ClockState {
-                    clock: overworld,
-                    total_ticks: day,
-                    partial_tick: 0.0,
-                    rate,
-                }],
-            }));
+        let jumped = self.last_clock != i64::MIN
+            && ((day - self.last_clock).abs() > step || rate != self.last_rate);
+        if self.ticks.is_multiple_of(20) || jumped {
+            self.broadcast_level(&self.time_packet(world, rate));
         }
         self.last_clock = day;
         self.last_rate = rate;
@@ -2606,22 +2560,14 @@ impl Hub {
                 | S::Interact(_)
                 | S::PlayerCommand(_)
                     if !self.guests[i].client_loaded() => {}
-                // handleAcceptTeleportPacket.
+                // handleAcceptTeleportPacket (1.21.11): the id alone; the player
+                // is put where the teleport sent it (absSnapTo), facing as it did.
                 S::AcceptTeleportation(p) => {
                     let recording = self.recording();
                     let g = &mut self.guests[i];
                     if let Some((id, at)) = g.awaiting_teleport
                         && id == p.id
                     {
-                        if p.x.is_nan()
-                            || p.y.is_nan()
-                            || p.z.is_nan()
-                            || !p.yaw.is_finite()
-                            || !p.pitch.is_finite()
-                        {
-                            self.kick(conn, invalid_movement());
-                            continue;
-                        }
                         g.position = at;
                         g.awaiting_teleport = None;
                         // The prediction's replay starts again where the client now is.
@@ -2632,8 +2578,6 @@ impl Hub {
                                 .get_or_insert_default()
                                 .teleported(at, kept);
                         }
-                        let rot = (p.yaw, p.pitch);
-                        self.position_change(i, [p.x, p.y, p.z], rot, 0, ctx, events);
                     }
                 }
                 // handlePlayerAbilities: the client flies only if it may.

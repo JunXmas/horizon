@@ -754,8 +754,10 @@ impl Game<'_> {
             }
         }
         let pitch = (1.0 + (client_float() - client_float()) * 0.2) * 0.7;
+        // 1.21.11's handleExplosion plays the sound from the packet: the
+        // guests hear it there, not from this window's capture.
         self.audio
-            .play("minecraft:entity.generic.explode", Some(center), 4.0, pitch);
+            .play_unshared("minecraft:entity.generic.explode", Some(center), 4.0, pitch);
         // ServerLevel.explode sends toBlow.size() whatever the interaction, and
         // `ServerExplosion.isSmall` also covers an explosion that keeps blocks.
         let block_count = targets.len();

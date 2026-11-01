@@ -2180,9 +2180,8 @@ impl Game<'_> {
                         always_show: false,
                         pos: at,
                         dist: [0.25, 0.0625, 0.25],
-                        max_speed: [0.05; 3],
+                        max_speed: 0.05,
                         count: 10,
-                        randomization: 0,
                     }),
                     None,
                 );

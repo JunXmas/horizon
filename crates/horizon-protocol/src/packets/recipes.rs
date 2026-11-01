@@ -1,10 +1,10 @@
 //! The recipe book's packets and the recipe displays they carry
-//! (`RecipeDisplay`, `SlotDisplay`, `RecipeDisplayEntry`): the 26.3
+//! (`RecipeDisplay`, `SlotDisplay`, `RecipeDisplayEntry`): the 1.21.11
 //! `minecraft:recipe_display` and `minecraft:slot_display` types in id order.
 use crate::{
     Result,
     buf::{Codec, Reader, Writer},
-    item::{Stack, Template},
+    item::{NonEmpty, Stack},
 };
 use horizon_world::nbt::Tag;
 
@@ -59,16 +59,10 @@ pub enum TrimPattern {
 pub enum SlotDisplay {
     Empty,
     AnyFuel,
-    WithAnyPotion(Box<SlotDisplay>),
-    /// The source, kept to the stacks with this data component type.
-    OnlyWithComponent(Box<SlotDisplay>, i32),
     Item(i32),
     ItemStack(Stack),
-    Tag(HolderSet),
-    Dyed {
-        dye: Box<SlotDisplay>,
-        target: Box<SlotDisplay>,
-    },
+    /// An item tag, by name.
+    Tag(String),
     SmithingTrim {
         base: Box<SlotDisplay>,
         material: Box<SlotDisplay>,
@@ -96,19 +90,10 @@ impl SlotDisplay {
         Ok(match r.varint()? {
             0 => Self::Empty,
             1 => Self::AnyFuel,
-            2 => Self::WithAnyPotion(inner(r)?),
-            3 => {
-                let source = inner(r)?;
-                Self::OnlyWithComponent(source, r.varint()?)
-            }
-            4 => Self::Item(r.varint()?),
-            5 => Self::ItemStack(Template::read(r)?),
-            6 => Self::Tag(HolderSet::read(r)?),
-            7 => Self::Dyed {
-                dye: inner(r)?,
-                target: inner(r)?,
-            },
-            8 => {
+            2 => Self::Item(r.varint()?),
+            3 => Self::ItemStack(NonEmpty::read(r)?),
+            4 => Self::Tag(r.string(32767)?),
+            5 => {
                 let base = inner(r)?;
                 let material = inner(r)?;
                 let pattern = match r.varint()? {
@@ -125,11 +110,11 @@ impl SlotDisplay {
                     pattern,
                 }
             }
-            9 => Self::WithRemainder {
+            6 => Self::WithRemainder {
                 input: inner(r)?,
                 remainder: inner(r)?,
             },
-            10 => {
+            7 => {
                 let n = r.count(r.remaining())?;
                 let mut out = Vec::with_capacity(n.min(256));
                 for _ in 0..n {
@@ -144,38 +129,24 @@ impl SlotDisplay {
         match self {
             Self::Empty => w.varint(0),
             Self::AnyFuel => w.varint(1),
-            Self::WithAnyPotion(d) => {
-                w.varint(2);
-                d.write(w);
-            }
-            Self::OnlyWithComponent(d, component) => {
-                w.varint(3);
-                d.write(w);
-                w.varint(*component);
-            }
             Self::Item(id) => {
-                w.varint(4);
+                w.varint(2);
                 w.varint(*id);
             }
             Self::ItemStack(stack) => {
-                w.varint(5);
-                Template::write(stack, w);
+                w.varint(3);
+                NonEmpty::write(stack, w);
             }
-            Self::Tag(set) => {
-                w.varint(6);
-                set.write(w);
-            }
-            Self::Dyed { dye, target } => {
-                w.varint(7);
-                dye.write(w);
-                target.write(w);
+            Self::Tag(name) => {
+                w.varint(4);
+                w.string(name);
             }
             Self::SmithingTrim {
                 base,
                 material,
                 pattern,
             } => {
-                w.varint(8);
+                w.varint(5);
                 base.write(w);
                 material.write(w);
                 match pattern {
@@ -193,12 +164,12 @@ impl SlotDisplay {
                 }
             }
             Self::WithRemainder { input, remainder } => {
-                w.varint(9);
+                w.varint(6);
                 input.write(w);
                 remainder.write(w);
             }
             Self::Composite(list) => {
-                w.varint(10);
+                w.varint(7);
                 w.varint(list.len() as i32);
                 list.iter().for_each(|d| d.write(w));
             }
@@ -584,7 +555,7 @@ mod tests {
                         width: 2,
                         height: 1,
                         ingredients: vec![
-                            SlotDisplay::Tag(HolderSet::Tag("minecraft:planks".into())),
+                            SlotDisplay::Tag("minecraft:planks".into()),
                             SlotDisplay::Empty,
                         ],
                         result: SlotDisplay::ItemStack(Stack::new(12, 4)),
@@ -603,16 +574,10 @@ mod tests {
                             input: Box::new(SlotDisplay::AnyFuel),
                             remainder: Box::new(SlotDisplay::Item(2)),
                         },
-                        addition: SlotDisplay::OnlyWithComponent(
-                            Box::new(SlotDisplay::WithAnyPotion(Box::new(SlotDisplay::Item(3)))),
-                            9,
-                        ),
+                        addition: SlotDisplay::Item(3),
                         result: SlotDisplay::SmithingTrim {
                             base: Box::new(SlotDisplay::Item(4)),
-                            material: Box::new(SlotDisplay::Dyed {
-                                dye: Box::new(SlotDisplay::Item(5)),
-                                target: Box::new(SlotDisplay::Item(6)),
-                            }),
+                            material: Box::new(SlotDisplay::Item(5)),
                             pattern: TrimPattern::Id(2),
                         },
                         station: SlotDisplay::Item(7),
@@ -630,5 +595,20 @@ mod tests {
         let mut r = Reader::new(&w.data);
         assert_eq!(RecipeBookAdd::read(&mut r).unwrap(), add);
         assert_eq!(r.remaining(), 0);
+    }
+
+    /// 1.21.11's slot display ids: 2 item, 3 item_stack (count first),
+    /// 4 tag (an identifier), 7 composite.
+    #[test]
+    fn slot_displays_are_1_21_11s() {
+        let display = SlotDisplay::Composite(vec![
+            SlotDisplay::Item(9),
+            SlotDisplay::ItemStack(Stack::new(5, 2)),
+            SlotDisplay::Tag("a:b".into()),
+        ]);
+        let mut w = Writer::new();
+        display.write(&mut w);
+        assert_eq!(w.data, [7, 3, 2, 9, 3, 2, 5, 0, 0, 4, 3, b'a', b':', b'b']);
+        assert_eq!(SlotDisplay::read(&mut Reader::new(&w.data)).unwrap(), display);
     }
 }
