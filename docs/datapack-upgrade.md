@@ -58,9 +58,10 @@ Each rewrite is the one vanilla's own data went through between 26.2 and
 | dimension type `bed_rule.explodes` | `bed_rule.destroy_on_use` | Rosetta |
 | `pack.mcmeta` | pack format 121 | vanilla loads it |
 
-Not rewritten: the feature types 26.3 replaced by compositions of other
+Kept as they are: the feature types 26.3 replaced by compositions of other
 features (`seagrass`, `kelp`, `basalt_columns`, `nether_forest_vegetation`
-and others; listed by the command), a `cache_2d` around a function of y, a
+and others) keep their type, and Horizon runs them as 1.21.11 did.
+Not rewritten: a `cache_2d` around a function of y, a
 `y_clamped_gradient` with `from_y == to_y` (a step instead of 26.2's NaN at
 that y), carvers' custom `lava_level`/`replaceable`, and noises with more
 than 32 octaves or negative amplitudes.

@@ -2,19 +2,6 @@
 use super::{Report, kind, states, vanilla};
 use serde_json::{Map, Value, json};
 
-/// Feature types 26.3 dropped for compositions of other features; a pack
-/// using them needs vanilla's composition, which the upgrade does not
-/// write.
-const REPLACED_FEATURES: [&str; 7] = [
-    "basalt_columns",
-    "basalt_pillar",
-    "desert_well",
-    "glowstone_blob",
-    "nether_forest_vegetation",
-    "twisting_vines",
-    "weeping_vines",
-];
-
 /// 26.2 block state provider types and their 26.3 names.
 fn provider(t: &str) -> Option<&'static str> {
     Some(match t {
@@ -49,9 +36,6 @@ pub(super) fn feature(v: &Value, report: &mut Report) -> Value {
     let Some(t) = kind(v) else {
         return v.clone();
     };
-    if REPLACED_FEATURES.contains(&t) {
-        report.unknown(format!("feature {t} (written as data in 26.3)"));
-    }
     let mut n = Map::new();
     n.insert("type".into(), o["type"].clone());
     if let Some(Value::Object(config)) = o.get("config") {

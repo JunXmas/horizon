@@ -87,6 +87,9 @@ pub enum FeatureDefinition {
     FallenTree(Box<super::tree::FallenTreeFeature>),
     /// 1.21.11's coral_tree, coral_claw and coral_mushroom (ocean_plants.rs).
     LegacyCoral(super::ocean_plants::CoralShape, std::sync::Arc<super::ocean_plants::CoralBlocks>),
+    /// 1.21.11's basalt, glowstone, nether vegetation, vines and desert well features
+    /// (hardcoded_features.rs).
+    Hardcoded(super::hardcoded_features::HardcodedFeature, std::sync::Arc<super::hardcoded_features::HardcodedBlocks>),
     /// 1.21.11's seagrass, kelp and sea_pickle features (ocean_plants.rs).
     OceanPlant(super::ocean_plants::OceanPlant, std::sync::Arc<super::ocean_plants::OceanBlocks>),
     /// RandomPatchFeature (1.21.11's random_patch, flower and no_bonemeal_flower; 26.1 writes
@@ -117,6 +120,7 @@ pub enum FeatureExecutionError<E> {
     BlockColumn(super::block_column::BlockColumnError<E>),
     BlockPile(super::block_pile::BlockPileError<E>),
     OceanPlant(super::ocean_plants::OceanPlantError<E>),
+    Hardcoded(super::hardcoded_features::HardcodedFeatureError<E>),
     Disk(super::disk::DiskError<E>),
     BlockBlob(super::block_blob::BlockBlobError<E>),
     SnowAndFreeze(super::snow_freeze::SnowAndFreezeError<E>),
@@ -147,6 +151,7 @@ impl<E: std::fmt::Display> std::fmt::Display for FeatureExecutionError<E> {
             Self::BlockColumn(e) => e.fmt(f),
             Self::BlockPile(e) => e.fmt(f),
             Self::OceanPlant(e) => e.fmt(f),
+            Self::Hardcoded(e) => e.fmt(f),
             Self::Disk(e) => e.fmt(f),
             Self::BlockBlob(e) => e.fmt(f),
             Self::SnowAndFreeze(e) => e.fmt(f),
@@ -341,6 +346,16 @@ impl FeatureDefinition {
                 let corals = super::ocean_plants::CoralBlocks::new(registry)
                     .map_err(|e| DecodeError::Registry(e.to_string()))?;
                 Ok(Self::LegacyCoral(shape, std::sync::Arc::new(corals)))
+            }
+            "minecraft:basalt_columns" | "minecraft:basalt_pillar" | "minecraft:glowstone_blob"
+            | "minecraft:nether_forest_vegetation" | "minecraft:twisting_vines"
+            | "minecraft:weeping_vines" | "minecraft:desert_well" => {
+                let bindings = blocks.ok_or(DecodeError::Field("hardcoded feature bindings"))?;
+                let feature = super::hardcoded_features::HardcodedFeature::decode(
+                    &kind, &object, bindings, depth, remaining,
+                )?;
+                let resolved = super::hardcoded_features::HardcodedBlocks::new(bindings)?;
+                Ok(Self::Hardcoded(feature, std::sync::Arc::new(resolved)))
             }
             "minecraft:seagrass" | "minecraft:kelp" | "minecraft:sea_pickle" => {
                 let registry = blocks.ok_or(DecodeError::Field("ocean plant bindings"))?.registry();
@@ -1141,6 +1156,9 @@ impl FeatureDefinition {
             Self::LegacyCoral(shape, corals) => shape
                 .place(corals, world, random, origin)
                 .map_err(FeatureExecutionError::OceanPlant),
+            Self::Hardcoded(feature, resolved) => feature
+                .place(resolved, world, random, origin)
+                .map_err(FeatureExecutionError::Hardcoded),
             Self::OceanPlant(plant, ocean) => plant
                 .place(ocean, world, random, origin)
                 .map_err(FeatureExecutionError::OceanPlant),

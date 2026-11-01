@@ -268,7 +268,7 @@ impl CoralShape {
         origin: [i32; 3],
     ) -> Result<bool, OceanPlantError<W::Error>> {
         let state = c.blocks[random.next_int_bound(c.blocks.len() as i32)? as usize];
-        let mut place = |world: &mut W, random: &mut _, at| coral_block(c, world, random, at, state);
+        let place = |world: &mut W, random: &mut _, at| coral_block(c, world, random, at, state);
         match self {
             Self::Tree => {
                 let mut pos = origin;
