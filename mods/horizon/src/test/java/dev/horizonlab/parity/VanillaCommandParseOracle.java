@@ -169,7 +169,6 @@ public final class VanillaCommandParseOracle {
         stopwatchesCtor.setAccessible(true);
         put(server, MinecraftServer.class, "stopwatches", stopwatchesCtor.newInstance());
         put(server, MinecraftServer.class, "customBossEvents", new net.minecraft.server.bossevents.CustomBossEvents());
-        put(server, MinecraftServer.class, "randomSequences", new net.minecraft.world.RandomSequences());
         // 1.21.11: /schedule reads the overworld's level data, and there are no world clocks.
         var worldData = (net.minecraft.world.level.storage.PrimaryLevelData) unsafe.allocateInstance(net.minecraft.world.level.storage.PrimaryLevelData.class);
         put(worldData, net.minecraft.world.level.storage.PrimaryLevelData.class, "scheduledEvents",
@@ -180,6 +179,8 @@ public final class VanillaCommandParseOracle {
         put(level, Level.class, "dimensionTypeRegistration",
             access.lookupOrThrow(Registries.DIMENSION_TYPE).getOrThrow(net.minecraft.world.level.dimension.BuiltinDimensionTypes.OVERWORLD));
         put(level, net.minecraft.server.level.ServerLevel.class, "server", server);
+        // 1.21.11: the random sequences belong to the level, not the server.
+        put(level, net.minecraft.server.level.ServerLevel.class, "randomSequences", new net.minecraft.world.RandomSequences());
         PlayerList playerList = (PlayerList) unsafe.allocateInstance(net.minecraft.server.dedicated.DedicatedPlayerList.class);
         put(playerList, PlayerList.class, "players", new ArrayList<>());
         put(server, MinecraftServer.class, "playerList", playerList);
