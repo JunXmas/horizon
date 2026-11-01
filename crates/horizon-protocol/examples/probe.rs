@@ -138,15 +138,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 play::Clientbound::Ping(p) => c.send(&play::Serverbound::Pong(p).encode())?,
                 play::Clientbound::PlayerPosition(p) => {
                     println!("position {:?} teleport {}", p.position, p.teleport);
-                    let [x, y, z] = p.position;
                     c.send(
                         &play::Serverbound::AcceptTeleportation(play::AcceptTeleportation {
                             id: p.teleport,
-                            x,
-                            y,
-                            z,
-                            yaw: p.yaw,
-                            pitch: p.pitch,
                         })
                         .encode(),
                     )?;

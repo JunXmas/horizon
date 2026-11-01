@@ -7,14 +7,6 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut output = String::new();
     for line in std::fs::read_to_string(&args[1])?.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
-        let entries = if fields.len() == 3 {
-            vec![GameRuleEntry {
-                name: format!("minecraft:{}", fields[1]),
-                value: fields[2].into(),
-            }]
-        } else {
-            vec![]
-        };
         let bytes = match fields[0] {
             "difficulty" => Serverbound::ChangeDifficulty(ChangeDifficultyRequest {
                 difficulty: fields[1].parse()?,
@@ -24,8 +16,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                 locked: fields[1].parse()?,
             })
             .encode(),
-            "set" => Serverbound::SetGameRule(SetGameRule { entries }).encode(),
-            "values" => Clientbound::GameRuleValues(GameRuleValues { entries }).encode(),
+            // 1.21.11 has no game rule packets (26.x's set_game_rule, game_rule_values).
             _ => return Err("unknown case".into()),
         };
         let mut reader = Reader::new(&bytes);

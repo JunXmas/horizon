@@ -529,7 +529,7 @@ fn a_move_behind_a_dig_and_its_swing_waits_for_the_next_tick() {
         }),
         0,
     ));
-    inbox.push_back((S::Punch(Empty), 0));
+    inbox.push_back((S::Swing(play::Swing { hand: 0 }), 0));
     inbox.push_back((
         S::MovePlayerPos(play::MovePlayerPos {
             x: at[0],
@@ -640,7 +640,7 @@ fn a_move_behind_a_use_on_a_block_and_its_swing_waits_for_the_next_tick() {
         }),
         0,
     ));
-    inbox.push_back((S::Punch(Empty), 0));
+    inbox.push_back((S::Swing(play::Swing { hand: 0 }), 0));
     inbox.push_back((
         S::MovePlayerPos(play::MovePlayerPos {
             x: at[0],
@@ -722,17 +722,11 @@ fn status_and_join() {
                     assert_eq!(p.position[0], 8.5);
                     bot.send(S::AcceptTeleportation(play::AcceptTeleportation {
                         id: p.teleport,
-                        x: p.position[0],
-                        y: p.position[1],
-                        z: p.position[2],
-                        yaw: 0.0,
-                        pitch: 0.0,
                     }));
                     teleported = true;
                 }
-                // The join's full clock sync; MinecraftServer's 20-tick
-                // forceGameTimeSynchronization sends no clocks and may come first.
-                C::SetTime(t) if !t.clocks.is_empty() => time = true,
+                // PlayerList.sendLevelInfo's time.
+                C::SetTime(_) => time = true,
                 C::PlayerInfoUpdate(u) => {
                     info |= u.entries.iter().any(|e| e.name.as_deref() == Some("Host"));
                 }
@@ -857,11 +851,6 @@ fn guests_see_each_other_and_the_world_entities() {
                     at = Some(p.position);
                     bot.send(S::AcceptTeleportation(play::AcceptTeleportation {
                         id: p.teleport,
-                        x: p.position[0],
-                        y: p.position[1],
-                        z: p.position[2],
-                        yaw: 0.0,
-                        pitch: 0.0,
                     }))
                 }
                 C::AddEntity(a) if a.id == 500 => zombies += 1,
@@ -892,11 +881,6 @@ fn guests_see_each_other_and_the_world_entities() {
             {
                 bot.send(S::AcceptTeleportation(play::AcceptTeleportation {
                     id: p.teleport,
-                    x: p.position[0],
-                    y: p.position[1],
-                    z: p.position[2],
-                    yaw: 0.0,
-                    pitch: 0.0,
                 }));
             }
             x += 0.2;
@@ -1033,11 +1017,6 @@ fn changed_biomes_reach_the_players_that_see_the_column() {
                 C::PlayerPosition(p) => {
                     bot.send(S::AcceptTeleportation(play::AcceptTeleportation {
                         id: p.teleport,
-                        x: p.position[0],
-                        y: p.position[1],
-                        z: p.position[2],
-                        yaw: 0.0,
-                        pitch: 0.0,
                     }))
                 }
                 C::LevelChunkWithLight(l) if (l.x, l.z) == (0, 0) => seen = true,
