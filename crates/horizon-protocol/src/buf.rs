@@ -472,14 +472,26 @@ impl Codec<[i32; 3]> for SectionPos {
 }
 /// ByteBufCodecs.BIT_SET: java.util.BitSet as a VarInt-prefixed byte array.
 pub struct BitSet;
+/// 1.21.11's `readBitSet`/`writeBitSet`: `BitSet.valueOf(long[])` / `toLongArray()` (26.x sends bytes).
+/// Held as little-endian bytes, as `BitSet.toByteArray` would give them.
 impl Codec<Vec<u8>> for BitSet {
     fn read(r: &mut Reader) -> Result<Vec<u8>> {
-        r.byte_array(r.remaining())
+        let mut bytes: Vec<u8> = r.long_array()?.iter().flat_map(|l| l.to_le_bytes()).collect();
+        let len = bytes.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+        bytes.truncate(len);
+        Ok(bytes)
     }
     fn write(v: &Vec<u8>, w: &mut Writer) {
-        // BitSet.toByteArray drops trailing zero bytes.
-        let len = v.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
-        w.byte_array(&v[..len])
+        // BitSet.toLongArray drops trailing zero words.
+        let len = v.iter().rposition(|&b| b != 0).map_or(0, |i| i / 8 + 1);
+        w.varint(len as i32);
+        for word in 0..len {
+            let mut bytes = [0u8; 8];
+            for (k, b) in bytes.iter_mut().enumerate() {
+                *b = v.get(word * 8 + k).copied().unwrap_or(0);
+            }
+            w.i64(i64::from_le_bytes(bytes));
+        }
     }
 }
 pub fn bit(set: &[u8], i: usize) -> bool {
@@ -677,13 +689,15 @@ mod tests {
     }
 
     #[test]
-    fn bitset_drops_trailing_zero_bytes() {
-        let mut set = vec![0u8; 4];
+    fn bitset_is_a_long_array_without_trailing_zero_words() {
+        let mut set = vec![0u8; 20];
         set_bit(&mut set, 3);
         set_bit(&mut set, 9);
+        set_bit(&mut set, 64);
         let mut w = Writer::new();
         BitSet::write(&set, &mut w);
-        assert_eq!(w.data, [2, 0b1000, 0b10]);
+        assert_eq!(w.data, [2, 0, 0, 0, 0, 0, 0, 0b10, 0b1000, 0, 0, 0, 0, 0, 0, 0, 1]);
+        assert!(bit(&BitSet::read(&mut Reader::new(&w.data)).unwrap(), 64));
         let read = BitSet::read(&mut Reader::new(&w.data)).unwrap();
         assert!(bit(&read, 3) && bit(&read, 9) && !bit(&read, 4) && !bit(&read, 100));
     }
