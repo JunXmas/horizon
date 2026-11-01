@@ -823,8 +823,15 @@ pub(crate) fn reuse_verified(
             source.join("manifest.json"),
             source.join("jars/client.jar"),
             source.join("jars/server.jar"),
-            found.jars["server"].clone(),
+            source.join("jars/server-game.jar"),
         ];
+        // An obfuscated version's remapped jars (verify hands those out instead).
+        files.extend(
+            ["client", "server"]
+                .map(|side| source.join(format!("jars/{side}-named.jar")))
+                .into_iter()
+                .filter(|p| p.exists()),
+        );
         files.extend(found.libraries);
         files.extend(client);
         for file in files {
@@ -911,13 +918,12 @@ pub fn verify(lock: &Lock) -> Result<Artifacts, String> {
         libraries.push(library);
     }
     if obfuscated(&manifest) {
-        // ponytail: the remapped jars come from tools/lab.py prepare (tools/remap.py), which downloads
-        // Mojang's mappings; horizon-prepare never downloads. A launcher doing the same is the upgrade.
+        // Remapped by remap::remap_imported, which runs first.
         for side in ["client", "server"] {
             let named = lock.directory.join(format!("jars/{side}-named.jar"));
             if !named.exists() {
                 return Err(format!(
-                    "{} is obfuscated: run tools/lab.py prepare once to remap it ({} is missing)",
+                    "{} is obfuscated and was not remapped ({} is missing)",
                     lock.version,
                     named.display()
                 ));

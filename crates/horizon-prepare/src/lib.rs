@@ -14,9 +14,10 @@ pub mod artifacts;
 pub mod exporters;
 mod files;
 mod inventory;
-mod legacy_tags;
 pub mod java;
+mod legacy_tags;
 pub mod pyjson;
+mod remap;
 mod sounds;
 mod survival;
 mod worker;
@@ -440,6 +441,7 @@ fn prepare_impl(options: &Options, log: Log, compile_only: bool) -> Result<PathB
         &artifacts::game_files(options.minecraft_dir.as_deref(), &lock.version).runtimes,
     ));
     let jdk = java::find_runtime(lock.java_major, &homes)?;
+    remap::remap_imported(root, &lock, &jdk, log)?;
     let reused = if options.import {
         artifacts::reuse_verified(root, log)?
     } else {
@@ -456,6 +458,7 @@ fn prepare_impl(options: &Options, log: Log, compile_only: bool) -> Result<PathB
                     options.server_jar.as_deref(),
                     log,
                 )?;
+                remap::remap_imported(root, &lock, &jdk, log)?;
             }
             let found = artifacts::verify(&lock)?;
             let libraries = artifacts::client_libraries(&lock, &found.manifest)?;
@@ -582,7 +585,10 @@ fn steps(
         return Err("Reference block tags disagree".into());
     }
     if run.legacy {
-        add_legacy_tags(&mut tags, &read_json(&root.join("legacy-motion-tags.json"))?)?;
+        add_legacy_tags(
+            &mut tags,
+            &read_json(&root.join("legacy-motion-tags.json"))?,
+        )?;
     }
     write_json(&root.join("block-tags.json"), &tags)?;
 
@@ -1027,7 +1033,10 @@ fn install_datagen_reports(root: &Path, reports: &Path) -> Result<(), String> {
     // 1.21.11 and older report every item's components in one items.json.
     let legacy = reports.join("items.json");
     if legacy.is_file() {
-        for (name, report) in read_json(&legacy)?.as_object().ok_or("items.json is not an object")? {
+        for (name, report) in read_json(&legacy)?
+            .as_object()
+            .ok_or("items.json is not an object")?
+        {
             let component = report
                 .get("components")
                 .ok_or_else(|| format!("{name} has no components"))?;
@@ -1062,9 +1071,13 @@ fn upgraded_worldgen(
 ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, String> {
     let mut files = std::collections::BTreeMap::new();
     for name in zip_names(server) {
-        let wanted = ["data/minecraft/worldgen/", "data/minecraft/tags/worldgen/", "data/minecraft/dimension_type/"]
-            .iter()
-            .any(|p| name.starts_with(p));
+        let wanted = [
+            "data/minecraft/worldgen/",
+            "data/minecraft/tags/worldgen/",
+            "data/minecraft/dimension_type/",
+        ]
+        .iter()
+        .any(|p| name.starts_with(p));
         if wanted && name.ends_with(".json") {
             files.insert(name.clone(), zip_bytes(server, &name)?);
         }
@@ -1081,8 +1094,14 @@ fn upgraded_resources(files: &std::collections::BTreeMap<String, Vec<u8>>, path:
     let prefix = format!("data/minecraft/{path}/");
     let mut resources = Value::Object(Vec::new());
     for (name, bytes) in files {
-        if let Some(rest) = name.strip_prefix(&prefix).and_then(|r| r.strip_suffix(".json")) {
-            resources.insert(&format!("minecraft:{rest}"), Value::Str(String::from_utf8_lossy(bytes).into_owned()));
+        if let Some(rest) = name
+            .strip_prefix(&prefix)
+            .and_then(|r| r.strip_suffix(".json"))
+        {
+            resources.insert(
+                &format!("minecraft:{rest}"),
+                Value::Str(String::from_utf8_lossy(bytes).into_owned()),
+            );
         }
     }
     resources
@@ -1097,7 +1116,9 @@ fn add_legacy_tags(tags: &mut Value, motion: &Value) -> Result<(), String> {
             _ => entries.iter().map(|e| Value::str(*e)).collect(),
         };
         if tags.get(name).is_some() {
-            return Err(format!("{name} is a real 1.21.11 tag; drop it from legacy_tags.rs"));
+            return Err(format!(
+                "{name} is a real 1.21.11 tag; drop it from legacy_tags.rs"
+            ));
         }
         let file = Value::Object(vec![("values".into(), Value::Array(values))]);
         tags.insert(name, Value::Str(pyjson::dumps(&file, &pyjson::DEFAULT)));
@@ -1171,13 +1192,20 @@ fn prepare_worldgen(run: &Run) -> Result<(), String> {
     let mut client = open_zip(&run.client)?;
     // 1.21.11 and older: vanilla's world generation data upgraded to 26.x's formats by the
     // data pack upgrader (horizon-port-pack), which spells 1.21.11's hardcoded parts as data.
-    let upgraded = if run.legacy { Some(upgraded_worldgen(&mut server, run.log)?) } else { None };
+    let upgraded = if run.legacy {
+        Some(upgraded_worldgen(&mut server, run.log)?)
+    } else {
+        None
+    };
     for (name, path) in WORLDGEN_BUNDLES {
         if let Some(files) = &upgraded {
             let mut resources = upgraded_resources(files, path);
             if path == "tags/block" {
                 resources = json_resources(&mut server, &format!("data/minecraft/{path}/"))?;
-                add_legacy_tags(&mut resources, &read_json(&root.join("legacy-motion-tags.json"))?)?;
+                add_legacy_tags(
+                    &mut resources,
+                    &read_json(&root.join("legacy-motion-tags.json"))?,
+                )?;
             }
             write_text(
                 &out.join(format!("{name}.json")),

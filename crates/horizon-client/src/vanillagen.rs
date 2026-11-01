@@ -198,7 +198,7 @@ impl VanillaTerrain {
                 unsupported.len()
             );
             for (feature, why) in &unsupported {
-                log::warn!("Horizon: skipped placed feature {feature}: {why}");
+                log::debug!("Horizon: skipped placed feature {feature}: {why}");
             }
             if !dir.join("blocks/block-properties.nbt").exists() {
                 log::warn!(
