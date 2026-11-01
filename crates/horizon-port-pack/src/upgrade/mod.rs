@@ -546,9 +546,11 @@ mod tests {
             json!({"type": "minecraft:disk", "config": {"state_provider": {"type":
                 "minecraft:simple_state_provider", "state": {"Name": "minecraft:clay"}}, "radius": 2}}),
         );
+        // A simple provider becomes its state as an object: a bare name in a provider field
+        // names a registered provider in 26.x (vanilla's disk_clay writes {"id": ...} too).
         assert_eq!(
             v,
-            json!({"type": "minecraft:disk", "state_provider": "minecraft:clay", "radius": 2})
+            json!({"type": "minecraft:disk", "state_provider": {"id": "minecraft:clay"}, "radius": 2})
         );
         let (v, _) = up(
             "data/x/worldgen/placed_feature/p.json",

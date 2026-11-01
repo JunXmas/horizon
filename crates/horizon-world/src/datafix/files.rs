@@ -1127,7 +1127,7 @@ mod upgrade_tests {
     fn failed_upgrade_keeps_old_data_version() {
         let base = std::env::temp_dir().join(format!("horizon-upgrade-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
-        let old = 4899;
+        let old = 4500;
         let level = Tag::compound([("Data", Tag::compound([("DataVersion", Tag::Int(old))]))]);
         write_dat(&base.join("level.dat"), &level).unwrap();
         let region = base.join("dimensions/minecraft/overworld/region");

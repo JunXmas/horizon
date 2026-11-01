@@ -41,14 +41,10 @@ fn level_data_of_1_20_moves_to_the_new_fields() {
          SpawnAngle: 90.0f, GameRules: {doFireTick: \"false\", keepInventory: \"true\", randomTickSpeed: \"5\"}}",
     );
     update(Ty::Level, &mut level, 3465, CURRENT);
-    let settings = level
-        .get("difficulty_settings")
-        .expect("difficulty settings");
-    assert_eq!(
-        dynamic::as_str(settings.get("difficulty")).as_deref(),
-        Some("hard")
-    );
-    assert_eq!(settings.get("locked"), Some(&Tag::Byte(1)));
+    // 1.21.11 keeps Difficulty and DifficultyLocked (26.1 moved them into difficulty_settings).
+    assert_eq!(level.get("Difficulty"), Some(&Tag::Byte(3)));
+    assert_eq!(level.get("DifficultyLocked"), Some(&Tag::Byte(1)));
+    assert!(level.get("difficulty_settings").is_none());
     let rules = level.get("game_rules").expect("game rules");
     assert_eq!(rules.get("minecraft:keep_inventory"), Some(&Tag::Byte(1)));
     assert_eq!(rules.get("minecraft:random_tick_speed"), Some(&Tag::Int(5)));
@@ -63,18 +59,20 @@ fn level_data_of_1_20_moves_to_the_new_fields() {
 }
 
 #[test]
-fn block_states_take_their_new_field_names() {
+fn block_states_keep_name_and_properties() {
+    // 1.21.11 writes block states as Name/Properties (26.1 renamed them id/properties).
     let mut chunk = snbt(
-        "{DataVersion: 4903, Status: \"minecraft:full\", sections: [{Y: 0b, block_states: \
+        "{DataVersion: 4500, Status: \"minecraft:full\", sections: [{Y: 0b, block_states: \
          {palette: [{Name: \"minecraft:chain\", Properties: {axis: \"y\"}}]}}]}",
     );
     update_chunk(&mut chunk, "minecraft:the_nether", Some("minecraft:noise"));
     let section = &dynamic::stream(chunk.get("sections"))[0];
     let state = &dynamic::stream(section.get("block_states").and_then(|b| b.get("palette")))[0];
+    // 1.21.9 renamed chain to iron_chain.
     assert_eq!(
-        dynamic::as_str(state.get("id")).as_deref(),
-        Some("minecraft:chain")
+        dynamic::as_str(state.get("Name")).as_deref(),
+        Some("minecraft:iron_chain")
     );
-    assert!(state.get("properties").is_some());
+    assert!(state.get("Properties").is_some());
     assert_eq!(chunk.get("DataVersion"), Some(&Tag::Int(CURRENT)));
 }

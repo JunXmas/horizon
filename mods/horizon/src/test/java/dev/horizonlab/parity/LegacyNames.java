@@ -26,5 +26,15 @@ final class LegacyNames {
         return RENAMED.getOrDefault(type.getSimpleName(), type.getSimpleName());
     }
 
+    /** Parents 26.1 inserted above a 1.21.11 class: BedBlock gained AbstractBedBlock (beds and the
+        straw bed), PointedDripstoneBlock gained SpeleothemBlock. Horizon's behaviour hangs on them. */
+    private static final Map<String, String> INSERTED_PARENT = Map.of(
+        "BedBlock", "AbstractBedBlock",
+        "PointedDripstoneBlock", "SpeleothemBlock");
+
+    static String insertedParent(Class<?> type) {
+        return INSERTED_PARENT.get(type.getSimpleName());
+    }
+
     private LegacyNames() {}
 }

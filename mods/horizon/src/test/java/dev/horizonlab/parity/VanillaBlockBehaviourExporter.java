@@ -127,6 +127,8 @@ public final class VanillaBlockBehaviourExporter {
         var result = new JsonArray();
         for (; c != null && c != top; c = c.getSuperclass()) {
             result.add(LegacyNames.name(c));
+            var parent = LegacyNames.insertedParent(c);
+            if (parent != null) result.add(parent);
         }
         return result;
     }

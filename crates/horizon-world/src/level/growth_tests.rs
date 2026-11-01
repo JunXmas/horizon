@@ -223,7 +223,6 @@ fn single_saplings_grow() {
     grow("jungle_sapling", "dirt", &[(0, 0)], "jungle_log");
     grow("acacia_sapling", "dirt", &[(0, 0)], "acacia_log");
     grow("cherry_sapling", "grass_block", &[(0, 0)], "cherry_log");
-    grow("poplar_sapling", "grass_block", &[(0, 0)], "poplar_log");
 }
 #[test]
 fn two_by_two_saplings_grow() {

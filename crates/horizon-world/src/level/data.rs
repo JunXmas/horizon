@@ -864,11 +864,18 @@ fn build_with_gameplay<G: GameplayStateSource>(
             emission: game.unsigned("emission") as u8,
             dampening: game.unsigned("dampening") as u8,
             hardness: game.number("hardness") as f32,
+            // 26.1's names, then 1.21.11's (NORMAL, DESTROY, BLOCK, IGNORE, PUSH_ONLY). 1.21.11's
+            // isPushable also refuses obsidian, crying obsidian, respawn anchors and reinforced
+            // deepslate by name, whose reaction is NORMAL: 26.1 made them IMMOVEABLE.
             push: match game.text("push") {
-                "PUSH" => PushReaction::Push,
-                "POPPED" => PushReaction::Popped,
-                "IMMOVEABLE" => PushReaction::Immoveable,
-                "IGNORE_ENTITY" => PushReaction::IgnoreEntity,
+                "PUSH" | "PUSH_ONLY" => PushReaction::Push,
+                "POPPED" | "DESTROY" => PushReaction::Popped,
+                "IMMOVEABLE" | "BLOCK" => PushReaction::Immoveable,
+                "IGNORE_ENTITY" | "IGNORE" => PushReaction::IgnoreEntity,
+                _ if matches!(
+                    registry.state(crate::registry::BlockStateId(id as u32)).map(|s| s.name.as_str()).unwrap_or(""),
+                    "minecraft:obsidian" | "minecraft:crying_obsidian" | "minecraft:respawn_anchor" | "minecraft:reinforced_deepslate"
+                ) => PushReaction::Immoveable,
                 _ => PushReaction::PushPull,
             },
             instrument: instrument_index(row.get(8).and_then(Value::as_str).unwrap_or("HARP")),
