@@ -31,13 +31,8 @@ pub const OVERWORLD: &str = "minecraft:overworld";
 pub const NETHER: &str = "minecraft:the_nether";
 pub const END: &str = "minecraft:the_end";
 
-/// `LevelStorageAccess.getDimensionPath`: `dimensions/<namespace>/<path>`.
-pub fn dimension_path(base: &Path, dimension: &str) -> PathBuf {
-    let (namespace, path) = dimension
-        .split_once(':')
-        .unwrap_or(("minecraft", dimension));
-    base.join("dimensions").join(namespace).join(path)
-}
+/// `LevelStorageAccess.getDimensionPath`.
+pub use crate::world_files::dimension_dir as dimension_path;
 
 /// The dimensions of a world: the three of vanilla, then any other folder
 /// below `dimensions/` (a datapack's, standing in for the `LEVEL_STEM` registry).
