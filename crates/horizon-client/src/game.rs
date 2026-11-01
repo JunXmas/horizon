@@ -13165,7 +13165,6 @@ impl Game<'_> {
             &self.world_root,
             self.options.execution_role,
         )?;
-        self.save_world_state();
         self.message = Some(("Saved the game".into(), Instant::now()));
         Ok(())
     }

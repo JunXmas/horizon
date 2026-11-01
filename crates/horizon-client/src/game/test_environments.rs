@@ -179,7 +179,6 @@ impl Game<'_> {
                 let previous = self.world.day_time;
                 if clock == "minecraft:overworld" {
                     self.world.day_time = *time;
-                    self.ui.clock.partial = 0.0;
                 }
                 Saved::Clock(previous)
             }
@@ -234,7 +233,6 @@ impl Game<'_> {
             (Environment::ClockTime { clock, .. }, Saved::Clock(previous)) => {
                 if clock == "minecraft:overworld" {
                     self.world.day_time = previous;
-                    self.ui.clock.partial = 0.0;
                 }
             }
             (_, Saved::Difficulty(d)) => self.set_difficulty_forced(d),

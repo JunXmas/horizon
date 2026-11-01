@@ -1,5 +1,5 @@
 //! Chat, the command registries and the per-world state behind commands
-//! (game rules, the world clock, difficulty), bound to the game.
+//! (game rules, the day time, difficulty), bound to the game.
 use super::{Game, Screen};
 use horizon_client::{
     chat::{
@@ -74,23 +74,6 @@ impl Game<'_> {
 /// The local player's name (offline single player).
 pub const PLAYER_NAME: &str = "Player";
 
-/// ServerClockManager.ServerClockInstance for the overworld clock (its
-/// total ticks are the world's day time).
-#[derive(Clone, Copy, Debug)]
-pub struct WorldClock {
-    pub partial: f32,
-    pub rate: f32,
-    pub paused: bool,
-}
-impl Default for WorldClock {
-    fn default() -> Self {
-        Self {
-            partial: 0.0,
-            rate: 1.0,
-            paused: false,
-        }
-    }
-}
 /// `ChatComponent.Draft`: the text the chat box kept, and whether it was a command.
 pub struct ChatDraft {
     pub text: String,
@@ -125,7 +108,6 @@ pub struct UiState {
     pub in_bed_chat: bool,
     pub registries: Registries,
     pub rules: GameRules,
-    pub clock: WorldClock,
     /// 0 peaceful .. 3 hard.
     pub difficulty: u8,
     /// F1: hide the HUD.
@@ -1142,24 +1124,17 @@ impl Game<'_> {
             .split(&text.resolve_legacy(), width as f32);
         split.into_iter().map(|row| (row, u32::MAX)).collect()
     }
-    /// Advance the overworld clock (ServerClockManager.tick) when
-    /// `advance_time` allows it.
+    /// `ServerLevel.tickTime`: the day time advances one tick while `advance_time` is on.
     pub(super) fn advance_clock(&mut self) {
-        if !self.ui.rules.bool("advance_time") || self.ui.clock.paused {
-            return;
+        if self.ui.rules.bool("advance_time") {
+            self.world.day_time += 1;
         }
-        let c = &mut self.ui.clock;
-        c.partial += c.rate;
-        let whole = c.partial.floor();
-        c.partial -= whole;
-        self.world.day_time += whole as i64;
     }
-    /// `ServerClockInstance.packNetworkState`: the rate players' clients
-    /// advance the overworld clock at, 0 while it is paused (`/time pause`)
-    /// or `advance_time` is off.
+    /// The rate players' clients advance the day time at: 1, or 0 while `advance_time`
+    /// is off (`ClientboundSetTimePacket.tickDayTime`).
     pub(super) fn network_clock_rate(&self) -> f32 {
-        if self.ui.rules.bool("advance_time") && !self.ui.clock.paused {
-            self.ui.clock.rate
+        if self.ui.rules.bool("advance_time") {
+            1.0
         } else {
             0.0
         }
@@ -1200,83 +1175,11 @@ impl Game<'_> {
     /// Load per-world command state when a world opens.
     pub(super) fn load_world_state(&mut self) {
         self.ui.rules = GameRules::load(&self.world_root);
-        self.ui.clock = WorldClock::default();
-        // PrimaryLevelData: the difficulty comes back from level.dat's difficulty_settings.
+        // PrimaryLevelData: the difficulty comes back from level.dat's Difficulty.
         self.ui.difficulty = self.level.difficulty_id();
-        if let Ok(bytes) = std::fs::read(self.world_root.join("data/minecraft/world_clocks.dat"))
-            && let Ok(raw) = horizon_world::compression::Compression::Gzip.decode(&bytes, 1 << 20)
-            && let Ok((root, _)) =
-                horizon_world::nbt::read_named(&raw, horizon_world::nbt::Limits::default())
-            && let Some(c) = root
-                .tag
-                .get("data")
-                .and_then(|d| d.get("minecraft:overworld"))
-        {
-            use horizon_world::nbt::Tag;
-            if let Some(Tag::Float(r)) = c.get("rate") {
-                self.ui.clock.rate = f32::from_bits(*r);
-            }
-            if let Some(Tag::Float(p)) = c.get("partial_tick") {
-                self.ui.clock.partial = f32::from_bits(*p);
-            }
-            if let Some(Tag::Byte(p)) = c.get("paused") {
-                self.ui.clock.paused = *p != 0;
-            }
-        }
         self.ui.chat.clear();
         self.build_registries();
         self.sync_rules();
-    }
-    /// Save the clock beside level.dat (Level.write saves the game rules: a
-    /// second writer of game_rules.dat could leave it with the rules loaded
-    /// when the world opened).
-    pub(super) fn save_world_state(&mut self) {
-        if self.world_root.as_os_str().is_empty() {
-            return;
-        }
-        use horizon_world::nbt::Tag;
-        let c = self.ui.clock;
-        // The other clocks stay as saved; the overworld one keeps the fields Horizon
-        // does not model, and (like vanilla's codec) omits rate, partial tick and
-        // pause while they have their defaults.
-        let path = self.world_root.join("data/minecraft/world_clocks.dat");
-        let existing = horizon_client::save::read_dat(&path);
-        let mut data = match existing.as_ref().and_then(|r| r.get("data")) {
-            Some(d @ Tag::Compound(_)) => d.clone(),
-            _ => Tag::Compound(Default::default()),
-        };
-        let mut clock = match data.get("minecraft:overworld") {
-            Some(c @ Tag::Compound(_)) => c.clone(),
-            _ => Tag::Compound(Default::default()),
-        };
-        if let Tag::Compound(map) = &mut clock {
-            map.insert("total_ticks".into(), Tag::Long(self.world.day_time));
-            for (key, value, default) in [
-                (
-                    "partial_tick",
-                    Tag::Float(c.partial.to_bits()),
-                    c.partial == 0.0,
-                ),
-                ("rate", Tag::Float(c.rate.to_bits()), c.rate == 1.0),
-                ("paused", Tag::Byte(i8::from(c.paused)), !c.paused),
-            ] {
-                if default {
-                    map.remove(&key.into());
-                } else {
-                    map.insert(key.into(), value);
-                }
-            }
-        }
-        if let Tag::Compound(map) = &mut data {
-            map.insert("minecraft:overworld".into(), clock);
-        }
-        let root = Tag::compound([
-            ("data", data),
-            ("DataVersion", Tag::Int(horizon_world::DATA_VERSION)),
-        ]);
-        if let Err(e) = horizon_client::save::write_dat(&path, root) {
-            log::warn!("the world clocks were not written: {e}");
-        }
     }
     /// Death message in chat (CombatTracker.getDeathMessage, as far as the
     /// cause is known to the client).
