@@ -57,7 +57,6 @@ fn parser_id(ty: &ArgType) -> String {
             Some("none") if values.len() == 3 && values[1] == "left_right" => {
                 "minecraft:template_mirror".into()
             }
-            Some("none") if values.len() == 3 => "minecraft:swing_animation".into(),
             _ => "minecraft:template_rotation".into(),
         },
         ArgType::HexColor => "minecraft:hex_color".into(),
@@ -80,7 +79,7 @@ fn parser_id(ty: &ArgType) -> String {
         ArgType::Criteria => "minecraft:objective_criteria".into(),
         ArgType::ScoreboardSlot => "minecraft:scoreboard_slot".into(),
         ArgType::Operation => "minecraft:operation".into(),
-        ArgType::TeamColor => "minecraft:team_color".into(),
+        ArgType::TeamColor => "minecraft:color".into(),
         ArgType::IntRange => "minecraft:int_range".into(),
         ArgType::FloatRange => "minecraft:float_range".into(),
         ArgType::NbtPath => "minecraft:nbt_path".into(),
@@ -90,15 +89,12 @@ fn parser_id(ty: &ArgType) -> String {
         ArgType::Particle => "minecraft:particle".into(),
         ArgType::Enum(words) => format!("enum:{}", words.join("|")),
         ArgType::Function => "minecraft:function".into(),
-        ArgType::Slots => "minecraft:slots".into(),
+        ArgType::Slots => "minecraft:item_slots".into(),
         ArgType::Slot => "minecraft:item_slot".into(),
-        ArgType::SlotSource => "minecraft:slot_source".into(),
         ArgType::ResourceOrId(r) => match *r {
             "minecraft:loot_table" => "minecraft:loot_table".into(),
             "minecraft:item_modifier" => "minecraft:loot_modifier".into(),
             "minecraft:predicate" => "minecraft:loot_predicate".into(),
-            "minecraft:context_int_provider" => "minecraft:context_int_provider".into(),
-            "minecraft:context_float_provider" => "minecraft:context_float_provider".into(),
             "minecraft:dialog" => "minecraft:dialog".into(),
             _ => "minecraft:feature".into(),
         },

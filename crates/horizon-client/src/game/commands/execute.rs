@@ -411,7 +411,7 @@ impl Game<'_> {
         sources: Vec<Source>,
         want: bool,
     ) -> R<i32> {
-        let numeric = ["entity", "data", "blocks", "items", "slots"]
+        let numeric = ["entity", "data", "blocks", "items"]
             .iter()
             .any(|k| c.has(k));
         let many = sources.len() > 1;
@@ -918,7 +918,7 @@ impl Game<'_> {
             let n = path.count(&data) as i32;
             return Ok((n > 0, n));
         }
-        if c.has("items") || c.has("slots") {
+        if c.has("items") {
             return self.condition_items(c);
         }
         if c.has("entity") {

@@ -131,8 +131,6 @@ pub enum ArgType {
     Slots,
     /// SlotArgument: one slot (`container.5`, `weapon.mainhand`).
     Slot,
-    /// SlotSourceArgument: a slot range name, or a slot source id or inline value.
-    SlotSource,
     /// ResourceOrIdArgument over a registry: an id or an inline SNBT value.
     ResourceOrId(&'static str),
     /// ResourceSelectorArgument: a `*`/`?` pattern over a registry's ids.
@@ -192,7 +190,7 @@ pub fn slot_ranges() -> Vec<(String, usize)> {
     range(&mut v, "hotbar.", 9);
     range(&mut v, "inventory.", 27);
     range(&mut v, "enderchest.", 27);
-    range(&mut v, "mob.inventory.", 8);
+    range(&mut v, "villager.", 8);
     range(&mut v, "horse.", 15);
     for (name, n) in [
         ("weapon", 1),
@@ -1511,8 +1509,11 @@ impl ArgType {
                 Arg::Str(op.to_owned())
             }
             ArgType::TeamColor => {
+                // ColorArgument: a colour or `reset` (ChatFormatting, not a format).
                 let name = reader.read_unquoted_string();
-                if horizon_client_core::scoreboard::team_color_rgb(name).is_none() {
+                if name != "reset"
+                    && horizon_client_core::scoreboard::team_color_rgb(name).is_none()
+                {
                     return Err(CommandError::tr_at(
                         "argument.color.invalid",
                         &[&name],
@@ -1611,20 +1612,6 @@ impl ArgType {
                 }
                 Arg::Str(word.to_owned())
             }
-            ArgType::SlotSource => {
-                // SlotSourceArgument: a slot range name, else a slot source id or inline value.
-                while reader.can_read() && reader.peek() != ' ' {
-                    reader.skip();
-                }
-                let word = &reader.string[start..reader.cursor];
-                if slot_ranges().iter().any(|(n, _)| n == word) {
-                    Arg::Str(word.to_owned())
-                } else {
-                    reader.cursor = start;
-                    super::codec::resource_or_id(reader, reg, "minecraft:slot_source")?;
-                    Arg::Str(reader.string[start..reader.cursor].to_owned())
-                }
-            }
             ArgType::ResourceOrId(registry) => {
                 super::codec::resource_or_id(reader, reg, registry)?;
                 Arg::Resource(reader.string[start..reader.cursor].to_owned())
@@ -1711,7 +1698,6 @@ impl ArgType {
                 let values = match *list {
                     "storages" => reg.storages.clone(),
                     "bossbars" => reg.bossbars.clone(),
-                    "schedules" => reg.schedules.clone(),
                     "stopwatches" => reg.stopwatches.clone(),
                     "recipes" => reg.recipes.clone(),
                     "sounds" => reg.sounds.clone(),
@@ -1813,17 +1799,9 @@ impl ArgType {
                 };
                 builder.suggest_matching(names.iter().map(String::as_str));
             }
-            ArgType::SlotSource => {
-                let mut sub = builder.offset(builder.start);
-                let names: Vec<String> = slot_ranges().into_iter().map(|(n, _)| n).collect();
-                sub.suggest_matching(names.iter().map(String::as_str));
-                builder.add(sub);
-                suggest_resources(builder, reg.ids("minecraft:slot_source"), "");
-            }
             ArgType::ResourceOrId(registry) => suggest_resources(builder, reg.ids(registry), ""),
-            ArgType::TeamColor => {
-                builder.suggest_matching(horizon_client_core::scoreboard::team_colors())
-            }
+            ArgType::TeamColor => builder
+                .suggest_matching(horizon_client_core::scoreboard::team_colors().chain(["reset"])),
             ArgType::Anchor => builder.suggest_matching(["eyes", "feet"]),
             ArgType::Component | ArgType::Style | ArgType::NbtTag => super::snbt::suggest(builder),
             ArgType::Swizzle | ArgType::Message | ArgType::Nbt => {}

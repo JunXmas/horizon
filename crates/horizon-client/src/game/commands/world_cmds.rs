@@ -284,48 +284,6 @@ impl Game<'_> {
         self.feedback(Text::translate("commands.rotate.success", &[name]));
         Ok(1)
     }
-    pub(super) fn cmd_swing(&mut self, ctx: &Context) -> R<i32> {
-        let targets = if ctx.get("targets").is_some() {
-            self.entities(ctx, "targets", false)?
-        } else {
-            vec![
-                self.command_source
-                    .and_then(|s| s.entity)
-                    .unwrap_or(Target::Player),
-            ]
-        };
-        let mut tracker = Tracker::default();
-        for t in targets {
-            match t {
-                Target::Player => self.swing_arm(),
-                Target::Mob(id) => {
-                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                        m.ai.swinging = true;
-                        m.ai.swing_time = -1;
-                    }
-                }
-                // An armor stand is a LivingEntity: it swings (invisibly).
-                Target::Stand(_) => {}
-                _ => continue,
-            }
-            let h = holder(self.target_name(t));
-            tracker.mark(&h);
-        }
-        let (message, total) = tracker.message(
-            false,
-            Some(err("commands.swing.failed.notliving", &[])),
-            |h, _| {
-                Text::translate(
-                    "commands.swing.success.single",
-                    std::slice::from_ref(&h.text),
-                )
-            },
-            |c, _| Text::translate("commands.swing.success.multiple", &[num(c)]),
-        )?;
-        self.feedback(message);
-        Ok(total)
-    }
-
     // ---- sounds -----------------------------------------------------------------------
 
     pub(super) fn cmd_playsound(&mut self, ctx: &Context) -> R<i32> {

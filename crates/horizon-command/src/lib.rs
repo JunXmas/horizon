@@ -288,6 +288,8 @@ pub enum Suggests {
     AdvancementCriteria,
     /// SuggestionProviders.SUMMONABLE_ENTITIES (with the type names as tooltips).
     SummonableEntities,
+    /// ScheduleCommand.SUGGEST_SCHEDULE: the scheduled events' ids.
+    Schedules,
     /// TriggerCommand.suggestObjectives: the source's enabled trigger objectives.
     Triggers,
     /// ScoreboardCommand.suggestTriggers: trigger objectives some of the
@@ -648,6 +650,9 @@ impl Suggests {
                     .map(|(o, _)| o.as_str())
                     .collect();
                 builder.suggest_matching(available);
+            }
+            Suggests::Schedules => {
+                builder.suggest_matching(reg.schedules.iter().map(String::as_str))
             }
             Suggests::Triggers => {
                 builder.suggest_matching(reg.trigger_objectives.iter().map(String::as_str))

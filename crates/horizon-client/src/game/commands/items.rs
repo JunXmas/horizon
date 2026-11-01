@@ -4,7 +4,6 @@ use super::{Arg, Context, Game, R, Target, err};
 use horizon_client::{
     command::{CommandError, args::ItemInput},
     items::ItemStack,
-    scoreboard_cmd::{Holder, Tracker},
     text::Text,
 };
 use horizon_world::nbt::Tag;
@@ -57,21 +56,35 @@ fn matches_name(pattern: &str, name: &str) -> bool {
 }
 
 impl Game<'_> {
-    fn owner_of(&mut self, ctx: &Context, prefix: &str, many: bool) -> R<Vec<Owner>> {
+    /// The block or the entities a `block <pos>` / `entity <name>` pair of
+    /// ItemCommands or `execute if items` names: the first such pair, or with
+    /// `source` the one after `from`.
+    fn owner_of(&mut self, ctx: &Context, name: &str, source: bool) -> R<Vec<Owner>> {
         let kind = ctx
             .literals
             .iter()
             .filter(|l| matches!(l.as_str(), "entity" | "block"))
-            .nth(usize::from(prefix == "source" && ctx.has("from")))
+            .nth(usize::from(source))
             .cloned()
             .unwrap_or_default();
+        let name = if source { "source" } else { name };
         if kind == "block" {
-            let p = self.block_pos_arg(ctx, &format!("{prefix}Pos"))?;
-            return Ok(vec![Owner::Block(p)]);
+            let pos = if source { "source" } else { "pos" };
+            return Ok(vec![Owner::Block(self.block_pos_arg(ctx, pos)?)]);
         }
-        let targets = self.entities(ctx, prefix, false)?;
-        let _ = many;
+        let targets = self.entities(ctx, name, false)?;
         Ok(targets.into_iter().map(Owner::Entity).collect())
+    }
+    /// ItemCommands.getContainer: the container block entity at `p`.
+    fn container_at(&self, p: [i32; 3], key: &str) -> R<()> {
+        match self.world.block_entities.get(&(p[0], p[1], p[2])) {
+            Some(horizon_client::containers::BlockEntity::Chest(_)) => Ok(()),
+            _ => Err(err(key, &[&p[0], &p[1], &p[2]])),
+        }
+    }
+    /// The one slot a SlotArgument names on an owner (None when it has none).
+    fn one_slot(&mut self, o: &Owner, name: &str) -> Option<Slot> {
+        self.slots_named(o, name).into_iter().next()
     }
     /// The slots a name (or wildcard group) addresses on an owner.
     pub(in crate::game) fn slots_named(&mut self, owner: &Owner, name: &str) -> Vec<Slot> {
@@ -298,18 +311,10 @@ impl Game<'_> {
             },
         }
     }
-    fn owner_holder(&self, o: &Owner) -> Holder {
+    fn owner_name(&self, o: &Owner) -> Text {
         match o {
-            Owner::Entity(t) => Holder {
-                name: String::new(),
-                text: self.target_name(*t),
-                display: None,
-            },
-            Owner::Block(p) => Holder {
-                name: String::new(),
-                text: Text::literal(format!("{}, {}, {}", p[0], p[1], p[2])),
-                display: None,
-            },
+            Owner::Entity(t) => self.target_name(*t),
+            Owner::Block(p) => Text::literal(format!("{}, {}, {}", p[0], p[1], p[2])),
         }
     }
     fn stack_name(&self, s: &ItemStack) -> Text {
@@ -651,13 +656,8 @@ impl Game<'_> {
             .cloned()
             .ok_or_else(|| err("argument.item_modifier.unknown", &[&id]))
     }
-    /// `/item modify (entity|block) <target> <slot> <modifier>`.
-    pub(super) fn cmd_item_modify(&mut self, ctx: &Context) -> R<i32> {
-        self.ensure_datapacks();
-        let targets = self.owner_of(ctx, "target", true)?;
-        let Some(Arg::Str(slot_name)) = ctx.get("slot").cloned() else {
-            return Ok(0);
-        };
+    /// ItemCommands.applyModifier.
+    fn modified(&mut self, ctx: &Context, stack: Option<ItemStack>) -> R<Option<ItemStack>> {
         let modifier = self.item_modifier_arg(ctx, "modifier")?;
         let source = self.command_source.unwrap_or_else(|| self.player_source());
         let view = source.entity.map(|t| self.entity_view_of(t));
@@ -665,274 +665,155 @@ impl Game<'_> {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos() as i64);
         let mut rng = horizon_core::random::LegacyRandom::new(seed);
-        let mut tracker = Tracker::default();
-        let mut selected = 0;
-        for o in &targets {
-            let slots = self.slots_named(o, &slot_name);
-            if slots.is_empty() {
-                if let Owner::Block(p) = o
-                    && !self.world.block_entities.contains_key(&(p[0], p[1], p[2]))
-                {
-                    return Err(err(
-                        "commands.item.target.not_a_container",
-                        &[&p[0], &p[1], &p[2]],
-                    ));
-                }
-                continue;
-            }
-            let mut changed = 0;
-            for slot in &slots {
-                // SlotSelector.NON_EMPTY_SLOTS
-                let Some(current) = self.slot_get(slot) else {
-                    continue;
-                };
-                selected += 1;
-                let new = self.apply_item_modifier(
-                    &modifier,
-                    Some(current.clone()),
-                    &mut rng,
-                    view.as_ref(),
-                    source.pos,
-                    0,
-                );
-                // CountingModifier: every slot set counts, changed or not;
-                // ItemStack.limitSize to the (new) max stack size.
-                let new = new.map(|mut s| {
-                    let max = self.stack_max_size(&s);
-                    s.count = s.count.min(max);
-                    s
-                });
-                if self.slot_set(slot, new) {
-                    changed += 1;
-                }
-            }
-            let h = self.owner_holder(o);
-            tracker.track(&h, changed);
-        }
-        if selected == 0 {
-            return Err(err("commands.item.target.no_such_slot", &[&slot_name]));
-        }
-        let pos = match targets.first() {
-            Some(Owner::Block(p)) => Some(*p),
-            _ => None,
-        };
-        let (message, total) = tracker.message(
-            false,
-            Some(err("commands.item.target.failed", &[])),
-            |h, count| {
-                let n = Text::literal(count.to_string());
-                match pos {
-                    Some(p) => Text::translate(
-                        "commands.item.block.modify.success",
-                        &[
-                            n,
-                            Text::literal(p[0].to_string()),
-                            Text::literal(p[1].to_string()),
-                            Text::literal(p[2].to_string()),
-                        ],
-                    ),
-                    None => Text::translate(
-                        "commands.item.entity.modify.success.single",
-                        &[n, h.text.clone()],
-                    ),
-                }
-            },
-            |c, _| {
-                Text::translate(
-                    "commands.item.entity.modify.success.multiple",
-                    &[Text::literal(c.to_string())],
-                )
-            },
-        )?;
-        self.feedback(message);
-        Ok(total)
+        let new =
+            self.apply_item_modifier(&modifier, stack, &mut rng, view.as_ref(), source.pos, 0);
+        // ItemStack.limitSize to the (new) max stack size.
+        Ok(new.map(|mut s| {
+            s.count = s.count.min(self.stack_max_size(&s));
+            s
+        }))
     }
-    /// `/item replace|fill|override <target> <slots> (with <item> [count] | from <source> <slots>)`.
-    pub(super) fn cmd_item(&mut self, ctx: &Context) -> R<i32> {
-        let mode = ctx
-            .literals
-            .iter()
-            .find(|l| matches!(l.as_str(), "replace" | "fill" | "override"))
-            .cloned()
-            .unwrap_or_default();
-        let targets = self.owner_of(ctx, "target", true)?;
-        let Some(Arg::Str(slot_name)) = ctx.get("slots").cloned() else {
+    /// ItemCommands.modifyBlockItem / modifyEntityItem.
+    pub(super) fn cmd_item_modify(&mut self, ctx: &Context) -> R<i32> {
+        self.ensure_datapacks();
+        let Some(Arg::Str(slot)) = ctx.get("slot").cloned() else {
             return Ok(0);
         };
-        // The items to place.
-        let (items, known): (Vec<Option<ItemStack>>, Option<ItemStack>) = if ctx.has("with") {
-            let stack = self.item_from_input(ctx)?;
-            (vec![stack.clone()], stack)
-        } else {
-            let sources = self.owner_of(ctx, "source", true)?;
-            let Some(Arg::Str(source_slots)) = ctx.get("sourceSlots").cloned() else {
-                return Ok(0);
-            };
-            let mut found = Vec::new();
-            for o in &sources {
-                for s in self.slots_named(o, &source_slots) {
-                    found.push(self.slot_get(&s));
-                }
+        let targets = self.owner_of(ctx, "targets", false)?;
+        let mut changed: Vec<(Owner, Option<ItemStack>)> = Vec::new();
+        for o in targets {
+            if let Owner::Block(p) = o {
+                self.container_at(p, "commands.item.target.not_a_container")?;
             }
-            if found.is_empty() {
-                return Err(match &sources[..] {
-                    [Owner::Block(p)] => err(
-                        "commands.item.source.not_a_container",
-                        &[&p[0], &p[1], &p[2]],
-                    ),
-                    _ => err("commands.item.source.no_such_slot", &[&source_slots]),
-                });
-            }
-            // ItemCommands.applyModifier on each source stack.
-            if ctx.get("modifier").is_some() {
-                let modifier = self.item_modifier_arg(ctx, "modifier")?;
-                let source = self.command_source.unwrap_or_else(|| self.player_source());
-                let view = source.entity.map(|t| self.entity_view_of(t));
-                let mut rng = horizon_core::random::LegacyRandom::new(0);
-                found = found
-                    .into_iter()
-                    .map(|s| {
-                        s.and_then(|s| {
-                            self.apply_item_modifier(
-                                &modifier,
-                                Some(s),
-                                &mut rng,
-                                view.as_ref(),
-                                source.pos,
-                                0,
-                            )
-                        })
-                    })
-                    .collect();
-            }
-            // A source with nothing in the slot contributes air.
-            (found, None)
-        };
-        let mut tracker = Tracker::default();
-        let mut selected = 0;
-        for o in &targets {
-            let slots = self.slots_named(o, &slot_name);
-            if slots.is_empty() {
-                if let Owner::Block(p) = o
-                    && !self.world.block_entities.contains_key(&(p[0], p[1], p[2]))
-                {
-                    return Err(err(
-                        "commands.item.target.not_a_container",
-                        &[&p[0], &p[1], &p[2]],
-                    ));
+            let Some(s) = self.one_slot(&o, &slot) else {
+                if matches!(o, Owner::Block(_)) {
+                    return Err(err("commands.item.target.no_such_slot", &[&slot]));
                 }
                 continue;
+            };
+            let current = self.slot_get(&s);
+            let stack = self.modified(ctx, current)?;
+            if self.slot_set(&s, stack.clone()) {
+                changed.push((o, stack));
             }
-            selected += slots.len();
-            let mut changed = 0;
-            for (i, slot) in slots.iter().enumerate() {
-                // `fill` cycles through the items; `replace` stops when they
-                // run out; `override` empties the rest.
-                let item = match mode.as_str() {
-                    "fill" => items.get(i % items.len()).cloned().flatten(),
-                    "override" => items.get(i).cloned().flatten(),
-                    _ => match items.get(i) {
-                        Some(x) => x.clone(),
-                        None => break,
-                    },
-                };
-                // ItemStack.isEmpty: air (or a count of 0) is an empty slot.
-                // SlotAccess.set counts every slot it sets, the same item too.
-                let item = item.filter(|s| &*s.item != "minecraft:air" && s.count > 0);
-                if self.slot_set(slot, item) {
-                    changed += 1;
-                }
-            }
-            let h = self.owner_holder(o);
-            tracker.track(&h, changed);
         }
-        if selected == 0 {
-            return Err(err("commands.item.target.no_such_slot", &[&slot_name]));
-        }
-        let block = matches!(targets.first(), Some(Owner::Block(_)));
-        let pos = match targets.first() {
-            Some(Owner::Block(p)) => *p,
-            _ => [0; 3],
-        };
-        let zero = match &known {
-            Some(k) => err(
-                "commands.item.target.failed.known_item",
-                &[&k.item.to_string()],
-            ),
-            None => err("commands.item.target.failed", &[]),
-        };
-        let name = known.as_ref().map(|k| self.stack_name(k));
-        let (message, total) = tracker.message(
-            false,
-            Some(zero),
-            |h, count| {
-                let n = Text::literal(count.to_string());
-                match (&name, block) {
-                    (Some(item), true) => Text::translate(
-                        "commands.item.block.replace.success.known_item",
-                        &[
-                            n,
-                            Text::literal(pos[0].to_string()),
-                            Text::literal(pos[1].to_string()),
-                            Text::literal(pos[2].to_string()),
-                            item.clone(),
-                        ],
-                    ),
-                    (None, true) => Text::translate(
-                        "commands.item.block.replace.success",
-                        &[
-                            n,
-                            Text::literal(pos[0].to_string()),
-                            Text::literal(pos[1].to_string()),
-                            Text::literal(pos[2].to_string()),
-                        ],
-                    ),
-                    (Some(item), false) => Text::translate(
-                        "commands.item.entity.replace.success.single.known_item",
-                        &[n, h.text.clone(), item.clone()],
-                    ),
-                    (None, false) => Text::translate(
-                        "commands.item.entity.replace.success.single",
-                        &[n, h.text.clone()],
-                    ),
-                }
-            },
-            |c, _| match &name {
-                Some(item) => Text::translate(
-                    "commands.item.entity.replace.success.multiple.known_item",
-                    &[Text::literal(c.to_string()), item.clone()],
-                ),
-                None => Text::translate(
-                    "commands.item.entity.replace.success.multiple",
-                    &[Text::literal(c.to_string())],
-                ),
-            },
-        )?;
-        self.feedback(message);
-        Ok(total)
+        self.item_set_feedback(changed, None, &slot)
     }
-    /// `if items` and `if slots`: how many items match / how many slots.
+    /// ItemCommands `replace ... with <item> [<count>]` and `replace ... from
+    /// (block|entity) <source> <sourceSlot> [<modifier>]`.
+    pub(super) fn cmd_item(&mut self, ctx: &Context) -> R<i32> {
+        let Some(Arg::Str(slot)) = ctx.get("slot").cloned() else {
+            return Ok(0);
+        };
+        let (stack, known) = if ctx.has("with") {
+            let stack = self.item_from_input(ctx)?;
+            (stack.clone(), stack)
+        } else {
+            let Some(Arg::Str(source_slot)) = ctx.get("sourceSlot").cloned() else {
+                return Ok(0);
+            };
+            let source = self.owner_of(ctx, "source", true)?;
+            let o = source
+                .first()
+                .cloned()
+                .ok_or_else(|| err("argument.entity.notfound.entity", &[]))?;
+            if let Owner::Block(p) = o {
+                self.container_at(p, "commands.item.source.not_a_container")?;
+            }
+            let s = self
+                .one_slot(&o, &source_slot)
+                .ok_or_else(|| err("commands.item.source.no_such_slot", &[&source_slot]))?;
+            let mut stack = self.slot_get(&s);
+            if ctx.get("modifier").is_some() {
+                self.ensure_datapacks();
+                stack = self.modified(ctx, stack)?;
+            }
+            (stack.clone(), stack)
+        };
+        let targets = self.owner_of(ctx, "targets", false)?;
+        let mut changed: Vec<(Owner, Option<ItemStack>)> = Vec::new();
+        for o in targets {
+            if let Owner::Block(p) = o {
+                self.container_at(p, "commands.item.target.not_a_container")?;
+            }
+            let Some(s) = self.one_slot(&o, &slot) else {
+                if matches!(o, Owner::Block(_)) {
+                    return Err(err("commands.item.target.no_such_slot", &[&slot]));
+                }
+                continue;
+            };
+            if self.slot_set(&s, stack.clone()) {
+                changed.push((o, stack.clone()));
+            }
+        }
+        self.item_set_feedback(changed, Some(known), &slot)
+    }
+    /// ItemCommands' `set.success` feedback: a block's slot, one entity's or
+    /// several; `known` is the stack every target was given (setEntityItem).
+    fn item_set_feedback(
+        &mut self,
+        changed: Vec<(Owner, Option<ItemStack>)>,
+        known: Option<Option<ItemStack>>,
+        slot: &str,
+    ) -> R<i32> {
+        let empty = ItemStack {
+            item: "minecraft:air".into(),
+            count: 0,
+            damage: 0,
+            extra: None,
+        };
+        let name = |g: &Self, s: &Option<ItemStack>| g.stack_name(s.as_ref().unwrap_or(&empty));
+        let message = match &changed[..] {
+            [] => {
+                return Err(match &known {
+                    Some(k) => CommandError::new(Text::translate(
+                        "commands.item.target.no_changed.known_item",
+                        &[name(self, k), Text::literal(slot)],
+                    )),
+                    None => err("commands.item.target.no_changes", &[&slot]),
+                });
+            }
+            [(Owner::Block(p), stack)] => Text::translate(
+                "commands.item.block.set.success",
+                &[
+                    Text::literal(p[0].to_string()),
+                    Text::literal(p[1].to_string()),
+                    Text::literal(p[2].to_string()),
+                    name(self, stack),
+                ],
+            ),
+            [(o, stack)] => Text::translate(
+                "commands.item.entity.set.success.single",
+                &[self.owner_name(o), name(self, stack)],
+            ),
+            [(_, stack), ..] => Text::translate(
+                "commands.item.entity.set.success.multiple",
+                &[
+                    Text::literal(changed.len().to_string()),
+                    name(self, known.as_ref().unwrap_or(stack)),
+                ],
+            ),
+        };
+        self.feedback(message);
+        Ok(changed.len() as i32)
+    }
+    /// ExecuteCommand.countItems: the matching items' count in the slots.
     pub(super) fn condition_items(&mut self, c: &Context) -> R<(bool, i32)> {
-        let owners = self.owner_of(c, "source", true)?;
+        let owners = self.owner_of(c, "entities", false)?;
+        if let [Owner::Block(p)] = owners[..] {
+            self.container_at(p, "commands.item.source.not_a_container")?;
+        }
         let Some(Arg::Str(slot_name)) = c.get("slots").cloned() else {
             return Ok((false, 0));
         };
-        let predicate = match c.get("item_predicate") {
-            Some(Arg::Item(p)) => Some(p.clone()),
-            _ => None,
+        let Some(Arg::Item(predicate)) = c.get("item_predicate").cloned() else {
+            return Ok((false, 0));
         };
         let mut count = 0;
         for o in owners {
-            let slots = self.slots_named(&o, &slot_name);
-            if predicate.is_none() {
-                count += slots.len() as i32;
-                continue;
-            }
-            for s in slots {
+            for s in self.slots_named(&o, &slot_name) {
                 if let Some(stack) = self.slot_get(&s)
-                    && predicate
-                        .as_ref()
-                        .is_some_and(|p| self.stack_matches(p, &stack))
+                    && self.stack_matches(&predicate, &stack)
                 {
                     count += stack.count as i32;
                 }

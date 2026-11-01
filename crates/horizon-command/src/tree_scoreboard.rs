@@ -170,8 +170,6 @@ fn team(d: &mut Dispatcher, root: usize) {
     let v = d.argument(dn, "displayName", ArgType::Component);
     d.executes(v, "team.modify.displayname");
     let color = d.literal(t, "color");
-    let reset = d.literal(color, "reset");
-    d.executes(reset, "team.modify.color.reset");
     let v = d.argument(color, "value", ArgType::TeamColor);
     d.executes(v, "team.modify.color");
     for (word, id) in [

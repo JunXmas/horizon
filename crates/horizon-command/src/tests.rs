@@ -486,7 +486,7 @@ fn execute_tree_covers_vanilla_forms() {
         "execute if predicate a:b",
         "execute if function a:b run say hi",
         "execute if items entity @s hotbar.* minecraft:stone",
-        "execute if slots block 0 0 0 container.*",
+        "execute if items block 0 0 0 container.* *",
         "execute positioned over world_surface run say hi",
         "execute summon minecraft:pig run say hi",
         "execute on vehicle run say hi",
@@ -533,11 +533,14 @@ fn function_and_misc_trees() {
     );
     assert_eq!(run("bossbar get a:b max").unwrap().0, "bossbar.get");
     assert_eq!(
-        run("item fill block 1 2 3 container.* with minecraft:stone 5")
+        run("item replace block 1 2 3 container.5 with minecraft:stone 5")
             .unwrap()
             .0,
         "item"
     );
+    // SlotArgument: one slot, not a range.
+    assert!(run("item replace block 1 2 3 container.* with minecraft:stone").is_err());
+    assert!(run("item fill block 1 2 3 container.0 with minecraft:stone").is_err());
     assert_eq!(
         run("item replace entity @s armor.head from block 0 0 0 container.3")
             .unwrap()
@@ -571,8 +574,6 @@ fn world_command_trees() {
         ("rotate @s 90 0", "rotate"),
         ("rotate @s facing entity @e[limit=1] eyes", "rotate"),
         ("rotate @s facing 0 64 0", "rotate"),
-        ("swing", "swing"),
-        ("swing @e offhand whack 10", "swing"),
         ("playsound minecraft:entity.cow.ambient", "playsound"),
         (
             "playsound minecraft:block.stone.break block @s ~ ~ ~ 1 1 0.5",

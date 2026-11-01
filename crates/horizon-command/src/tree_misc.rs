@@ -3,7 +3,7 @@
 use super::{
     Dispatcher,
     args::ArgType,
-    vanilla::{ENTITIES, GAMEMASTERS, PLAYERS},
+    vanilla::{ENTITIES, ENTITY, GAMEMASTERS, PLAYERS},
 };
 
 fn int() -> ArgType {
@@ -46,7 +46,8 @@ pub fn register(d: &mut Dispatcher, root: usize) {
         d.executes(m, "schedule.function");
     }
     let clear = d.literal(schedule, "clear");
-    let id = d.argument(clear, "function", ArgType::Id("schedules"));
+    let id = d.argument(clear, "function", ArgType::Greedy);
+    d.suggests(id, super::Suggests::Schedules);
     d.executes(id, "schedule.clear");
 
     // random (value|roll) <range> [<sequence>] | reset (*|<sequence>) ...
@@ -156,59 +157,46 @@ pub fn register(d: &mut Dispatcher, root: usize) {
     d.executes(name, "datapack.disable");
 }
 
-/// `item (replace|fill|override) (entity|block) <target> <slots> (with <item> [<count>] | from ...)`.
+/// ItemCommands: `item modify|replace (block <pos>|entity <targets>) <slot> ...`.
 fn item(d: &mut Dispatcher, root: usize) {
     let item = d.literal(root, "item");
     d.requires(item, GAMEMASTERS);
-    let modify = d.literal(item, "modify");
-    for provider in ["entity", "block"] {
-        let p = d.literal(modify, provider);
-        let target = if provider == "entity" {
-            d.argument(p, "target", ENTITIES)
-        } else {
-            d.argument(p, "targetPos", ArgType::BlockPos)
-        };
-        let slot = d.argument(target, "slot", ArgType::SlotSource);
-        let modifier = d.argument(
-            slot,
+    let target = |d: &mut Dispatcher, parent: usize| {
+        let b = d.literal(parent, "block");
+        let pos = d.argument(b, "pos", ArgType::BlockPos);
+        let e = d.literal(parent, "entity");
+        let targets = d.argument(e, "targets", ENTITIES);
+        [pos, targets].map(|t| d.argument(t, "slot", ArgType::Slot))
+    };
+    let modifier = |d: &mut Dispatcher, parent: usize, id: &'static str| {
+        let m = d.argument(
+            parent,
             "modifier",
             ArgType::ResourceOrId("minecraft:item_modifier"),
         );
-        d.executes(modifier, "item.modify");
-    }
-    for mode in ["replace", "fill", "override"] {
-        let m = d.literal(item, mode);
-        for provider in ["entity", "block"] {
-            let p = d.literal(m, provider);
-            let target = if provider == "entity" {
-                d.argument(p, "target", ENTITIES)
-            } else {
-                d.argument(p, "targetPos", ArgType::BlockPos)
-            };
-            let slots = d.argument(target, "slots", ArgType::SlotSource);
-            let with = d.literal(slots, "with");
-            let it = d.argument(with, "item", ArgType::Item);
-            d.executes(it, "item");
-            let count = d.argument(it, "count", ArgType::Integer { min: 1, max: 99 });
-            d.executes(count, "item");
-            let from = d.literal(slots, "from");
-            for src in ["entity", "block"] {
-                let s = d.literal(from, src);
-                let source = if src == "entity" {
-                    d.argument(s, "source", ENTITIES)
-                } else {
-                    d.argument(s, "sourcePos", ArgType::BlockPos)
-                };
-                let source_slots = d.argument(source, "sourceSlots", ArgType::SlotSource);
-                d.executes(source_slots, "item");
-                let modifier = d.argument(
-                    source_slots,
-                    "modifier",
-                    ArgType::ResourceOrId("minecraft:item_modifier"),
-                );
-                d.executes(modifier, "item");
-            }
+        d.executes(m, id);
+    };
+    let replace = d.literal(item, "replace");
+    for slot in target(d, replace) {
+        let with = d.literal(slot, "with");
+        let it = d.argument(with, "item", ArgType::Item);
+        d.executes(it, "item");
+        let count = d.argument(it, "count", ArgType::Integer { min: 1, max: 99 });
+        d.executes(count, "item");
+        let from = d.literal(slot, "from");
+        let b = d.literal(from, "block");
+        let source_pos = d.argument(b, "source", ArgType::BlockPos);
+        let e = d.literal(from, "entity");
+        let source = d.argument(e, "source", ENTITY);
+        for s in [source_pos, source] {
+            let source_slot = d.argument(s, "sourceSlot", ArgType::Slot);
+            d.executes(source_slot, "item");
+            modifier(d, source_slot, "item");
         }
+    }
+    let modify = d.literal(item, "modify");
+    for slot in target(d, modify) {
+        modifier(d, slot, "item.modify");
     }
 }
 

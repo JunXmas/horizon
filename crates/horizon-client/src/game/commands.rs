@@ -969,7 +969,6 @@ impl Game<'_> {
             "spectate" => self.cmd_spectate(ctx),
             id if id.starts_with("waypoint.") => self.cmd_waypoint(id, ctx),
             id if id.starts_with("dialog.") => self.cmd_dialog(id, ctx),
-            id if id.starts_with("posteffect.") => self.cmd_posteffect(id, ctx),
             "kick" => self.cmd_kick(ctx),
             "op" | "deop" | "ban" | "pardon" => self.cmd_profiles(id, ctx),
             "ban-ip" | "pardon-ip" => self.cmd_ip_bans(id, ctx),
@@ -977,12 +976,10 @@ impl Game<'_> {
             id if id.starts_with("whitelist.") => self.cmd_whitelist(id, ctx),
             "fetchprofile" => self.cmd_fetchprofile(ctx),
             "publish" => self.cmd_publish(ctx),
-            "unpublish" => self.cmd_unpublish(),
             "debug" => self.cmd_debug(ctx),
             "jfr" => self.cmd_jfr(ctx),
             "version" => self.cmd_version(),
             id if id.starts_with("test.") => self.cmd_test(id, ctx),
-            "compute" => self.cmd_compute(ctx),
             "place" => self.cmd_place(ctx),
             "place.feature" | "place.jigsaw" | "place.structure" => {
                 self.cmd_place_generated(id, ctx)
@@ -990,7 +987,6 @@ impl Game<'_> {
             "recipe.give" | "recipe.take" => self.cmd_recipe(id, ctx),
             "damage" => self.cmd_damage(ctx),
             "rotate" => self.cmd_rotate(ctx),
-            "swing" => self.cmd_swing(ctx),
             "playsound" => self.cmd_playsound(ctx),
             "stopsound" => self.cmd_stopsound(ctx),
             "particle" => self.cmd_particle(ctx),

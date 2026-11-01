@@ -77,26 +77,6 @@ fn require(map: &Compound, t: &Tag, keys: &[&str]) -> Result<(), String> {
         Err(missing.join("; "))
     }
 }
-/// The required fields of each context number provider type, in the
-/// order DataFixerUpper reports them missing (the reverse of the record's).
-fn provider_fields(id: &str, map: &Compound, t: &Tag) -> Result<(), String> {
-    match id.trim_start_matches("minecraft:") {
-        "uniform" => require(map, t, &["max", "min"]),
-        "constant" => require(map, t, &["value"]),
-        "binomial" => require(map, t, &["p", "n"]),
-        "add" | "mul" | "avg" | "max" | "min" | "length" => require(map, t, &["inputs"]),
-        "sub" | "div" | "mod" | "floor_div" | "floor_mod" => require(map, t, &["right", "left"]),
-        "pow" => require(map, t, &["exponent", "base"]),
-        "abs" | "negate" | "from_float" | "from_int" | "floor" | "ceil" | "round" | "sqrt"
-        | "sin" | "cos" | "truncate" => require(map, t, &["input"]),
-        "conditional" => require(map, t, &["on_true", "condition"]),
-        "number_dispatcher" => require(map, t, &["cases"]),
-        "weighted_list" => require(map, t, &["distribution"]),
-        "enchantment_level" => require(map, t, &["amount"]),
-        "score" => require(map, t, &["score", "target"]),
-        _ => Ok(()),
-    }
-}
 /// A holder list codec: a single element, a `#tag`, or a list.
 fn element_or_list(t: &Tag, element: &dyn Fn(&Tag) -> Result<(), String>) -> Result<(), String> {
     let first = match element(t) {
@@ -125,22 +105,11 @@ fn element_or_list(t: &Tag, element: &dyn Fn(&Tag) -> Result<(), String>) -> Res
 /// Decode an inline value of a ResourceOrIdArgument registry.
 pub fn decode(registry: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match registry {
-        "minecraft:context_int_provider" | "minecraft:context_float_provider" => {
-            if is_number(t) {
-                return Ok(());
-            }
-            let ty = format!("{registry}_type");
-            let second = dispatch(t, reg, &ty, &provider_fields);
-            second.map_err(|e| either("Not a number".into(), e))
-        }
         "minecraft:predicate" => {
             dispatch(t, reg, "minecraft:loot_condition_type", &|_, _, _| Ok(()))
         }
         "minecraft:item_modifier" => element_or_list(t, &|x| {
             dispatch(x, reg, "minecraft:loot_function_type", &|_, _, _| Ok(()))
-        }),
-        "minecraft:slot_source" => element_or_list(t, &|x| {
-            dispatch(x, reg, "minecraft:slot_source_type", &|_, _, _| Ok(()))
         }),
         // Dialog types: CommonDialogData's title, then each type's own.
         "minecraft:dialog" => dispatch(t, reg, "minecraft:dialog_type", &|id, map, t| {
@@ -155,7 +124,7 @@ pub fn decode(registry: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
                 .collect();
             require(map, t, &keys)
         }),
-        "minecraft:worldgen/feature" | "minecraft:loot_table" => match t {
+        "minecraft:loot_table" => match t {
             Tag::Compound(_) => Ok(()),
             _ => Err(not_map(t)),
         },

@@ -59,7 +59,7 @@ pub fn register(d: &mut Dispatcher, root: usize) {
     let f = d.argument(
         feature,
         "feature",
-        ArgType::ResourceOrId("minecraft:worldgen/feature"),
+        ArgType::ResKey("minecraft:worldgen/configured_feature"),
     );
     d.executes(f, "place.feature");
     let pos = d.argument(f, "pos", ArgType::BlockPos);
@@ -166,27 +166,6 @@ fn rotate_swing(d: &mut Dispatcher, root: usize) {
     d.executes(anchor, "rotate");
     let loc = d.argument(facing, "facingLocation", ArgType::Vec3 { center: true });
     d.executes(loc, "rotate");
-
-    let swing = d.literal(root, "swing");
-    d.requires(swing, GAMEMASTERS);
-    d.executes(swing, "swing");
-    let targets = d.argument(swing, "targets", ENTITIES);
-    d.executes(targets, "swing");
-    for hand in ["mainhand", "offhand"] {
-        let h = d.literal(targets, hand);
-        d.executes(h, "swing");
-        let animation = d.argument(
-            h,
-            "animation",
-            ArgType::StrEnum(
-                &["none", "whack", "stab"],
-                "argument.swing_animation.invalid",
-            ),
-        );
-        d.executes(animation, "swing");
-        let duration = d.argument(animation, "duration", ArgType::Time { min: 1 });
-        d.executes(duration, "swing");
-    }
 }
 
 fn sounds(d: &mut Dispatcher, root: usize) {

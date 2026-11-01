@@ -1,8 +1,7 @@
 //! Commands that act on the player and the hosted game rather than the world:
 //! `/spectate` (SpectateCommand), `/waypoint` (WaypointCommand), `/dialog`
-//! (DialogCommand), `/posteffect` (PostEffectCommand), `/kick`,
-//! `/fetchprofile`, `/publish`, `/unpublish`, `/debug`, `/jfr` and
-//! `/version`, with vanilla's feedback and failures.
+//! (DialogCommand), `/kick`, `/fetchprofile`, `/publish`, `/debug`, `/jfr`
+//! and `/version`, with vanilla's feedback and failures.
 use super::{Arg, Context, Game, R, Target, err};
 use horizon_client::{
     command::CommandError,
@@ -121,8 +120,6 @@ pub(in crate::game) struct CommandExtras {
     /// `/spectate` for a guest: connection and the camera's network id
     /// (None to stop), taken in the guests' tick.
     pub camera_requests: Vec<(u32, Option<i32>)>,
-    /// ServerPlayer.postEffects, in insertion order.
-    pub post_effects: Vec<String>,
     /// MinecraftServer's tick profiler (`/debug start`): when it started and
     /// the tick count then.
     pub profiler: Option<(Instant, u64)>,
@@ -553,124 +550,6 @@ impl Game<'_> {
         Ok(n)
     }
 
-    // ---- /posteffect ----------------------------------------------------
-
-    /// `ServerPlayer.postEffects` of a player target: a connected player's
-    /// (told to their client at the end of their tick), or the host's own.
-    fn post_effects_of(&self, t: Target) -> Vec<String> {
-        let conn = match t {
-            Target::Guest(conn) => Some(conn),
-            Target::Player => self.lan_acting,
-            _ => return Vec::new(),
-        };
-        match conn {
-            Some(conn) => self
-                .command_guest(conn)
-                .map(|g| g.post_effects.clone())
-                .unwrap_or_default(),
-            None => self.cmds.post_effects.clone(),
-        }
-    }
-
-    /// Changes a player target's `postEffects`; whether `change` did, which
-    /// sets `postEffectsDirty` for the packet.
-    fn change_post_effects(
-        &mut self,
-        t: Target,
-        change: impl FnOnce(&mut Vec<String>) -> bool,
-    ) -> bool {
-        let conn = match t {
-            Target::Guest(conn) => Some(conn),
-            Target::Player => self.lan_acting,
-            _ => return false,
-        };
-        match conn {
-            Some(conn) => {
-                let Some(g) = self.lan.as_mut().and_then(|h| h.hub.guest_mut(conn)) else {
-                    return false;
-                };
-                let changed = change(&mut g.post_effects);
-                g.post_effects_dirty |= changed;
-                changed
-            }
-            None => change(&mut self.cmds.post_effects),
-        }
-    }
-
-    pub(super) fn cmd_posteffect(&mut self, id: &str, ctx: &Context) -> R<i32> {
-        if id == "posteffect.list" {
-            let t = self.one_entity(ctx, "target", true)?;
-            let name = self.target_name(t);
-            let effects = self.post_effects_of(t);
-            if effects.is_empty() {
-                self.feedback(Text::translate("commands.posteffect.list.empty", &[name]));
-            } else {
-                self.feedback(Text::translate(
-                    "commands.posteffect.list.success",
-                    &[name, num(effects.len()), Text::literal(effects.join(", "))],
-                ));
-            }
-            return Ok(effects.len() as i32);
-        }
-        let targets = self.entities(ctx, "targets", true)?;
-        let effect = match ctx.get("posteffect") {
-            Some(Arg::Resource(s)) => s.clone(),
-            _ => String::new(),
-        };
-        let mut changed: Vec<Target> = Vec::new();
-        for t in &targets {
-            let done = self.change_post_effects(*t, |list| match id {
-                // ServerPlayer.addPostEffect.
-                "posteffect.add" => {
-                    if list.contains(&effect) {
-                        false
-                    } else {
-                        list.push(effect.clone());
-                        true
-                    }
-                }
-                // ServerPlayer.removePostEffect.
-                "posteffect.remove" => match list.iter().position(|e| *e == effect) {
-                    Some(i) => {
-                        list.remove(i);
-                        true
-                    }
-                    None => false,
-                },
-                // ServerPlayer.clearPostEffects.
-                _ => !std::mem::take(list).is_empty(),
-            });
-            if done {
-                changed.push(*t);
-            }
-        }
-        let key = id.trim_start_matches("posteffect.");
-        if changed.is_empty() {
-            return Err(err(&format!("commands.posteffect.{key}.failed"), &[]));
-        }
-        let n = changed.len() as i32;
-        let effect_text = Text::literal(effect);
-        let message = match (key, n) {
-            ("clear", 1) => Text::translate(
-                "commands.posteffect.clear.success.single",
-                &[self.target_name(changed[0])],
-            ),
-            ("clear", _) => {
-                Text::translate("commands.posteffect.clear.success.multiple", &[num(n)])
-            }
-            (_, 1) => Text::translate(
-                &format!("commands.posteffect.{key}.success.single"),
-                &[effect_text, self.target_name(changed[0])],
-            ),
-            _ => Text::translate(
-                &format!("commands.posteffect.{key}.success.multiple"),
-                &[effect_text, num(n)],
-            ),
-        };
-        self.feedback(message);
-        Ok(n)
-    }
-
     // ---- /test ----------------------------------------------------------
 
     /// `TestCommand`: running, resetting and clearing tests is
@@ -809,43 +688,18 @@ impl Game<'_> {
             });
             return Ok(1);
         }
-        if ctx.literals.iter().any(|l| l == "id") {
-            let id = match ctx.get("id") {
-                Some(Arg::Str(s)) => horizon_client::command::selector::java_uuid(s),
-                _ => None,
-            }
-            .unwrap_or_default();
-            // `Component.translationArg(id)`: the UUID's string form.
-            self.cmds.profile_fetches.push(ProfileFetch {
-                key: NameOrId::Id(id),
-                kind: "id",
-                argument: Text::literal(horizon_protocol::crypto::uuid_string(id)),
-                source: self.command_source,
-            });
-            return Ok(1);
+        let id = match ctx.get("id") {
+            Some(Arg::Str(s)) => horizon_client::command::selector::java_uuid(s),
+            _ => None,
         }
-        let t = self.one_entity(ctx, "entity", false)?;
-        if t != Target::Player {
-            return Err(tr_error(
-                "commands.fetchprofile.no_profile",
-                &[self.target_name(t)],
-            ));
-        }
-        let [a, b, c, d] = self.level.player_uuid.unwrap_or([0; 4]);
-        let id = (u128::from(a as u32) << 96)
-            | (u128::from(b as u32) << 64)
-            | (u128::from(c as u32) << 32)
-            | u128::from(d as u32);
-        let name = super::super::chat::PLAYER_NAME;
-        self.report_resolved_profile(
-            "commands.fetchprofile.entity.success",
-            Text::literal(name),
-            &ResolvedProfile {
-                id,
-                name: name.to_owned(),
-                properties: Vec::new(),
-            },
-        );
+        .unwrap_or_default();
+        // `Component.translationArg(id)`: the UUID's string form.
+        self.cmds.profile_fetches.push(ProfileFetch {
+            key: NameOrId::Id(id),
+            kind: "id",
+            argument: Text::literal(horizon_protocol::crypto::uuid_string(id)),
+            source: self.command_source,
+        });
         Ok(1)
     }
     /// The answers of the profile lookups that have come in
@@ -948,6 +802,11 @@ impl Game<'_> {
     /// `PublishCommand.publish` with `IntegratedServer.publishServer`.
     pub(super) fn cmd_publish(&mut self, ctx: &Context) -> R<i32> {
         let allow = matches!(ctx.get("allowCommands"), Some(Arg::Bool(true)));
+        // IntegratedServer.publishedGameType: the mode guests are put in.
+        let mode = match ctx.get("gamemode") {
+            Some(Arg::GameMode(m)) => Some(*m as i32),
+            _ => None,
+        };
         let port = match ctx.get("port") {
             Some(Arg::Int(p)) => *p,
             // HttpUtil.getAvailablePort.
@@ -961,12 +820,12 @@ impl Game<'_> {
             self.lan.as_ref().map(|l| l.settings.port)
         };
         if let Some(port) = published {
-            return Err(err("commands.publish.alreadyPublished.lan", &[&port]));
+            return Err(err("commands.publish.alreadyPublished", &[&port]));
         }
         let settings = super::super::lan::LanSettings {
             port: port as u16,
             guest_commands: allow,
-            force_game_mode: false,
+            force_game_mode: mode.is_some(),
         };
         let started = if self.serving() {
             self.publish(settings).is_ok()
@@ -976,34 +835,25 @@ impl Game<'_> {
         if !started {
             return Err(err("commands.publish.failed", &[]));
         }
+        // ponytail: the forced mode rides on the hub's default mode, not a
+        // separate publishedGameType; `/defaultgamemode` later replaces it.
+        if let (Some(mode), Some(host)) = (mode, self.lan.as_mut()) {
+            host.hub.config.default_game_mode = mode;
+        }
+        // ComponentUtils.copyOnClickText.
         let port_text = port.to_string();
         let link = Text::literal(port_text.clone()).with_style(&Style {
             color: Some(text::GREEN),
+            click: Some(ClickEvent::CopyToClipboard(port_text)),
             hover: Some(Box::new(Text::translate("chat.copy.click", &[]))),
             ..Style::default()
         });
         self.feedback(Text::translate(
-            "commands.publish.started.lan",
+            "commands.publish.started",
             &[Text::translate("chat.square_brackets", &[link])],
         ));
         Ok(port)
     }
-    pub(super) fn cmd_unpublish(&mut self) -> R<i32> {
-        if self.serving() {
-            if !self.unpublish() {
-                return Err(err("commands.unpublish.notPublished", &[]));
-            }
-            self.feedback(Text::translate("commands.unpublish.success", &[]));
-            return Ok(1);
-        }
-        if self.lan.is_none() {
-            return Err(err("commands.unpublish.notPublished", &[]));
-        }
-        self.lan_close(false);
-        self.feedback(Text::translate("commands.unpublish.success", &[]));
-        Ok(1)
-    }
-
     // ---- /debug, /jfr, /version -----------------------------------------
 
     pub(super) fn cmd_debug(&mut self, ctx: &Context) -> R<i32> {

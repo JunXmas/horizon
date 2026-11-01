@@ -260,17 +260,10 @@ pub fn argument_type(id: i32, props: &[u8]) -> ArgType {
             "motion_blocking_no_leaves",
             "ocean_floor",
         ]),
-        "minecraft:swing_animation" => ArgType::Enum(&["none", "whack", "stab"]),
         "minecraft:loot_table" => ArgType::ResourceOrId("minecraft:loot_table"),
         "minecraft:loot_predicate" => ArgType::ResourceOrId("minecraft:predicate"),
         "minecraft:loot_modifier" => ArgType::ResourceOrId("minecraft:item_modifier"),
-        "minecraft:context_float_provider" => {
-            ArgType::ResourceOrId("minecraft:context_float_provider")
-        }
-        "minecraft:context_int_provider" => ArgType::ResourceOrId("minecraft:context_int_provider"),
-        "minecraft:slot_source" => ArgType::SlotSource,
         "minecraft:dialog" => ArgType::ResourceOrId("minecraft:dialog"),
-        "minecraft:feature" => ArgType::ResourceOrId("minecraft:worldgen/feature"),
         "minecraft:uuid" => ArgType::Uuid,
         _ => ArgType::Word,
     }
