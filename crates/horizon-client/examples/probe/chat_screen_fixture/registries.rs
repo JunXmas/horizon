@@ -63,10 +63,6 @@ pub fn registries(r: &Value, permission: u8) -> Registries {
     reg.templates = strings(&r["templates"]);
     reg.persistent_components = strings(&r["persistent_components"]);
     reg.learnable_recipes = strings(&r["learnable_recipes"]);
-    for (clock, markers) in r["clock_time_markers"].as_object().into_iter().flatten() {
-        reg.clock_time_markers
-            .insert(clock.clone(), strings(markers));
-    }
     for (id, criteria) in r["advancement_criteria"].as_object().into_iter().flatten() {
         reg.advancement_criteria
             .insert(id.clone(), strings(criteria));

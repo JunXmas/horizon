@@ -91,30 +91,6 @@ impl Default for WorldClock {
         }
     }
 }
-/// A clock time marker from the timelines (ClockTimeMarker).
-#[derive(Clone, Copy, Debug)]
-pub struct TimeMarker {
-    pub ticks: i64,
-    pub period: Option<i64>,
-    pub show: bool,
-}
-impl TimeMarker {
-    pub fn occurs_at(&self, total: i64) -> bool {
-        match self.period {
-            Some(p) => self.ticks == total.rem_euclid(p),
-            None => self.ticks == total,
-        }
-    }
-    pub fn resolve(&self, total: i64) -> i64 {
-        match self.period {
-            Some(p) => {
-                let d = self.ticks - total.rem_euclid(p);
-                total + if d > 0 { d } else { p + d }
-            }
-            None => self.ticks,
-        }
-    }
-}
 /// `ChatComponent.Draft`: the text the chat box kept, and whether it was a command.
 pub struct ChatDraft {
     pub text: String,
@@ -150,9 +126,6 @@ pub struct UiState {
     pub registries: Registries,
     pub rules: GameRules,
     pub clock: WorldClock,
-    /// Time markers and timelines of the overworld clock.
-    pub markers: BTreeMap<String, TimeMarker>,
-    pub timelines: BTreeMap<String, Option<i64>>,
     /// 0 peaceful .. 3 hard.
     pub difficulty: u8,
     /// F1: hide the HUD.
@@ -488,42 +461,7 @@ impl Game<'_> {
             "minecraft:the_end".into(),
         ];
         reg.players = vec![PLAYER_NAME.into()];
-        // Timelines of the overworld clock and their time markers.
-        self.ui.markers.clear();
-        self.ui.timelines.clear();
-        for name in list("data/minecraft/timeline") {
-            let path = root.join(format!(
-                "data/minecraft/timeline/{}.json",
-                name.trim_start_matches("minecraft:")
-            ));
-            let Ok(v) = serde_json::from_slice::<serde_json::Value>(
-                &std::fs::read(path).unwrap_or_default(),
-            ) else {
-                continue;
-            };
-            if v["clock"].as_str() != Some("minecraft:overworld") {
-                continue;
-            }
-            let period = v["period_ticks"].as_i64();
-            self.ui.timelines.insert(name.clone(), period);
-            for (marker, def) in v["time_markers"].as_object().into_iter().flatten() {
-                let (ticks, show) = match def {
-                    serde_json::Value::Number(n) => (n.as_i64().unwrap_or(0), false),
-                    other => (
-                        other["ticks"].as_i64().unwrap_or(0),
-                        other["show_in_commands"].as_bool().unwrap_or(false),
-                    ),
-                };
-                self.ui.markers.insert(
-                    marker.clone(),
-                    TimeMarker {
-                        ticks,
-                        period,
-                        show,
-                    },
-                );
-            }
-        }
+        reg.timelines = list("data/minecraft/timeline");
         // Vanilla's built-in registries (mob effects, components, dialogs...).
         for dir in [&self.options.resources, &self.ui.vanilla_root] {
             if let Some(export) = command_export(dir) {
@@ -531,15 +469,6 @@ impl Game<'_> {
                 break;
             }
         }
-        let reg = &mut self.ui.registries;
-        reg.timelines = self.ui.timelines.keys().cloned().collect();
-        reg.time_markers = self
-            .ui
-            .markers
-            .iter()
-            .filter(|(_, m)| m.show)
-            .map(|(k, _)| k.clone())
-            .collect();
     }
     /// The block the player is looking at, for coordinate suggestions, and
     /// the entity, for entity arguments (ClientSuggestionProvider).

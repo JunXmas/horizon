@@ -23,7 +23,6 @@ pub struct Registries {
     pub dimensions: Vec<String>,
     pub clocks: Vec<String>,
     pub timelines: Vec<String>,
-    pub time_markers: Vec<String>,
     pub advancements: Vec<String>,
     /// Game rule name -> integer-valued.
     pub game_rules: Vec<(String, bool)>,
@@ -77,8 +76,6 @@ pub struct Registries {
     pub learnable_recipes: Vec<String>,
     /// Advancement id -> criterion names.
     pub advancement_criteria: BTreeMap<String, Vec<String>>,
-    /// World clock -> time markers shown in commands.
-    pub clock_time_markers: BTreeMap<String, Vec<String>>,
     /// Trigger objectives the source may use (`/trigger` suggestions).
     pub trigger_objectives: Vec<String>,
     /// Objectives with the `trigger` criterion -> holder -> whether its score is locked.
@@ -192,12 +189,6 @@ impl Registries {
         if self.block_tag_members.is_empty() {
             for (tag, members) in r["block_tag_members"].as_object().into_iter().flatten() {
                 self.block_tag_members.insert(tag.clone(), strings(members));
-            }
-        }
-        if self.clock_time_markers.is_empty() {
-            for (clock, markers) in r["clock_time_markers"].as_object().into_iter().flatten() {
-                self.clock_time_markers
-                    .insert(clock.clone(), strings(markers));
             }
         }
         if self.advancement_criteria.is_empty() {

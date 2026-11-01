@@ -288,8 +288,6 @@ pub enum Suggests {
     AdvancementCriteria,
     /// SuggestionProviders.SUMMONABLE_ENTITIES (with the type names as tooltips).
     SummonableEntities,
-    /// TimeCommand.suggestTimeMarkers for the parsed `clock` (or the overworld clock).
-    TimeMarkers,
     /// TriggerCommand.suggestObjectives: the source's enabled trigger objectives.
     Triggers,
     /// ScoreboardCommand.suggestTriggers: trigger objectives some of the
@@ -630,19 +628,6 @@ impl Suggests {
                         ));
                         builder.suggest_tooltip(id.clone(), name);
                     }
-                }
-            }
-            Suggests::TimeMarkers => {
-                let clock = match context.get("clock") {
-                    Some(Arg::Resource(id)) => id.clone(),
-                    _ => "minecraft:overworld".to_owned(),
-                };
-                match reg.clock_time_markers.get(&clock) {
-                    Some(markers) => args::suggest_resources(builder, markers, ""),
-                    None if clock == "minecraft:overworld" => {
-                        args::suggest_resources(builder, &reg.time_markers, "")
-                    }
-                    None => {}
                 }
             }
             Suggests::EnableTriggers => {

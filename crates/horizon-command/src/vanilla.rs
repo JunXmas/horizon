@@ -111,16 +111,28 @@ pub fn registered(dev: bool) -> Dispatcher {
     d.requires(alias, GAMEMASTERS);
     d.redirect(alias, tp);
 
-    // time: clock nodes for the dimension's default clock, plus `of <clock>`.
+    // time set day|noon|night|midnight|<time> | add <time> | query daytime|gametime|day
     let time = d.literal(root, "time");
     d.requires(time, GAMEMASTERS);
-    clock_nodes(&mut d, time);
+    let set = d.literal(time, "set");
+    for name in ["day", "noon", "night", "midnight"] {
+        let l = d.literal(set, name);
+        d.executes(l, "time.set");
+    }
+    let t = d.argument(set, "time", ArgType::Time { min: 0 });
+    d.executes(t, "time.set");
+    let add = d.literal(time, "add");
+    let t = d.argument(add, "time", ArgType::Time { min: 0 });
+    d.executes(t, "time.add");
     let query = d.literal(time, "query");
-    let gt = d.literal(query, "gametime");
-    d.executes(gt, "time.query.gametime");
-    let of = d.literal(time, "of");
-    let clock = d.argument(of, "clock", ArgType::Resource(Resource::Clock));
-    clock_nodes(&mut d, clock);
+    for (name, id) in [
+        ("daytime", "time.query.daytime"),
+        ("gametime", "time.query.gametime"),
+        ("day", "time.query.day"),
+    ] {
+        let l = d.literal(query, name);
+        d.executes(l, id);
+    }
 
     // weather (clear|rain|thunder) [<duration>]
     let weather = d.literal(root, "weather");
@@ -445,39 +457,6 @@ fn advancement(d: &mut Dispatcher, root: usize) {
     }
 }
 
-/// TimeCommand.addClockNodes.
-fn clock_nodes(d: &mut Dispatcher, node: usize) {
-    let set = d.literal(node, "set");
-    let t = d.argument(set, "time", ArgType::Time { min: 0 });
-    d.executes(t, "time.set");
-    let marker = d.argument(set, "timemarker", ArgType::Id("time_markers"));
-    d.suggests(marker, super::Suggests::TimeMarkers);
-    d.executes(marker, "time.set.marker");
-    let add = d.literal(node, "add");
-    let t = d.argument(add, "time", ArgType::Time { min: i32::MIN });
-    d.executes(t, "time.add");
-    let pause = d.literal(node, "pause");
-    d.executes(pause, "time.pause");
-    let resume = d.literal(node, "resume");
-    d.executes(resume, "time.resume");
-    let rate = d.literal(node, "rate");
-    let r = d.argument(
-        rate,
-        "rate",
-        ArgType::Float {
-            min: 1.0e-5,
-            max: 1000.0,
-        },
-    );
-    d.executes(r, "time.rate");
-    let query = d.literal(node, "query");
-    let time = d.literal(query, "time");
-    d.executes(time, "time.query.time");
-    let tl = d.argument(query, "timeline", ArgType::Resource(Resource::Timeline));
-    d.executes(tl, "time.query.timeline");
-    let rep = d.literal(tl, "repetition");
-    d.executes(rep, "time.query.repetition");
-}
 /// FillCommand.wrapWithMode.
 fn fill_modes(d: &mut Dispatcher, node: usize) {
     d.executes(node, "fill");

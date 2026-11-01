@@ -26,7 +26,6 @@ fn reg() -> Registries {
     ];
     r.players = vec!["Player".into()];
     r.dimensions = vec!["minecraft:overworld".into()];
-    r.time_markers = vec!["minecraft:day".into(), "minecraft:noon".into()];
     // The registry elements the commands below name (vanilla checks them while parsing).
     let mut registry = |name: &str, ids: &[&str]| {
         r.by_registry.insert(
@@ -129,7 +128,9 @@ fn parses_vanilla_commands() {
     );
     assert_eq!(run("time set 1000").unwrap().0, "time.set");
     assert_eq!(run("time set 1d").unwrap().0, "time.set");
-    assert_eq!(run("time set day").unwrap().0, "time.set.marker");
+    assert_eq!(run("time set noon").unwrap().0, "time.set");
+    assert!(run("time set minecraft:noon").is_err());
+    assert_eq!(run("time query day").unwrap().0, "time.query.day");
     assert_eq!(run("time query gametime").unwrap().0, "time.query.gametime");
     assert_eq!(run("weather rain 10s").unwrap().0, "weather");
     assert_eq!(run("xp add @s 5 levels").unwrap().0, "experience");
@@ -254,7 +255,10 @@ fn suggestions_like_vanilla() {
         ]
     );
     assert_eq!(suggestions("time set 5"), ["d", "s", "t"]);
-    assert!(suggestions("time set ").contains(&"minecraft:day".to_owned()));
+    assert_eq!(
+        suggestions("time set "),
+        ["day", "midnight", "night", "noon"]
+    );
 }
 /// ClientSuggestionProvider: block and column positions offer the targeted
 /// block (`getRelevantCoordinates`), `Vec3` and `Vec2` the exact hit point

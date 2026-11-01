@@ -1710,145 +1710,18 @@ impl Game<'_> {
         self.feedback(message);
         Ok(targets.len() as i32)
     }
+    /// TimeCommand (1.21.11): one day time for every level.
     fn cmd_time(&mut self, id: &str, ctx: &Context) -> R<i32> {
-        if id == "time.query.gametime" {
-            let t = self.world.game_time;
-            self.system_message(Text::tr("commands.time.query.gametime", &[&t]));
-            return Ok((t % i64::from(i32::MAX)) as i32);
+        let (day, key, arg, result) =
+            time_command(id, ctx, self.world.day_time, self.world.game_time);
+        self.world.day_time = day;
+        let message = Text::tr(key, &[&arg]);
+        if key == "commands.time.set" {
+            self.feedback(message);
+        } else {
+            self.feedback_unbroadcast(message);
         }
-        // `time of <clock>` names the clock; otherwise the dimension's default clock.
-        let clock = match ctx.get("clock") {
-            Some(Arg::Resource(c)) => c.clone(),
-            _ => {
-                if self.dim == Dim::Nether {
-                    return Err(err(
-                        "commands.time.no_default_clock",
-                        &[&"minecraft:the_nether"],
-                    ));
-                }
-                "minecraft:overworld".to_owned()
-            }
-        };
-        if clock != "minecraft:overworld" {
-            // Only the overworld clock runs in Horizon (no End yet).
-            return Err(err("commands.time.no_default_clock", &[&clock]));
-        }
-        let total = self.world.day_time;
-        match id {
-            "time.set" => {
-                let t = i64::from(Self::int(ctx, "time").unwrap_or(0));
-                if total == t {
-                    return Err(err("commands.time.set.already_at_time", &[&clock, &t]));
-                }
-                self.world.day_time = t;
-                self.ui.clock.partial = 0.0;
-                self.feedback(Text::tr("commands.time.set.absolute", &[&clock, &t]));
-                Ok(t as i32)
-            }
-            "time.set.marker" => {
-                let Some(Arg::Resource(marker)) = ctx.get("timemarker").cloned() else {
-                    return Ok(0);
-                };
-                let Some(m) = self.ui.markers.get(&marker).copied() else {
-                    return Err(err(
-                        "commands.time.no_time_marker_found",
-                        &[&marker, &clock],
-                    ));
-                };
-                if m.occurs_at(total) {
-                    return Err(err(
-                        "commands.time.set.already_at_time_marker",
-                        &[&clock, &marker],
-                    ));
-                }
-                self.world.day_time = m.resolve(total);
-                self.ui.clock.partial = 0.0;
-                self.feedback(Text::tr(
-                    "commands.time.set.time_marker",
-                    &[&clock, &marker],
-                ));
-                Ok((self.world.day_time % i64::from(i32::MAX)) as i32)
-            }
-            "time.add" => {
-                let t = i64::from(Self::int(ctx, "time").unwrap_or(0));
-                self.world.day_time = (total + t).max(0);
-                let now = self.world.day_time;
-                self.feedback(Text::tr("commands.time.set.absolute", &[&clock, &now]));
-                Ok((now % i64::from(i32::MAX)) as i32)
-            }
-            "time.pause" | "time.resume" => {
-                let pause = id == "time.pause";
-                if self.ui.clock.paused == pause {
-                    return Err(err(
-                        if pause {
-                            "commands.time.pause.already_paused"
-                        } else {
-                            "commands.time.pause.already_running"
-                        },
-                        &[&clock],
-                    ));
-                }
-                self.ui.clock.paused = pause;
-                self.feedback(Text::tr(
-                    if pause {
-                        "commands.time.pause"
-                    } else {
-                        "commands.time.resume"
-                    },
-                    &[&clock],
-                ));
-                Ok(1)
-            }
-            "time.rate" => {
-                let rate = match ctx.get("rate") {
-                    Some(Arg::Float(r)) => *r,
-                    _ => 1.0,
-                };
-                if self.ui.clock.rate == rate {
-                    return Err(err(
-                        "commands.time.rate.already_same",
-                        &[&clock, &java_float(f64::from(rate))],
-                    ));
-                }
-                self.ui.clock.rate = rate;
-                self.feedback(Text::tr(
-                    "commands.time.rate",
-                    &[&clock, &java_float(f64::from(rate))],
-                ));
-                Ok(1)
-            }
-            "time.query.time" => {
-                self.system_message(Text::tr("commands.time.query.absolute", &[&clock, &total]));
-                Ok((total % i64::from(i32::MAX)) as i32)
-            }
-            "time.query.timeline" | "time.query.repetition" => {
-                let Some(Arg::Resource(timeline)) = ctx.get("timeline").cloned() else {
-                    return Ok(0);
-                };
-                let Some(period) = self.ui.timelines.get(&timeline).copied() else {
-                    return Err(err(
-                        "commands.time.wrong_timeline_for_clock",
-                        &[&clock, &timeline],
-                    ));
-                };
-                if id == "time.query.timeline" {
-                    let ticks = period.map_or(total, |p| total.rem_euclid(p));
-                    self.system_message(Text::tr(
-                        "commands.time.query.timeline",
-                        &[&timeline, &ticks],
-                    ));
-                    Ok(ticks as i32)
-                } else {
-                    let reps = period.map_or(0, |p| total / p);
-                    self.system_message(Text::tr(
-                        "commands.time.query.timeline.repetitions",
-                        &[&timeline, &reps],
-                    ));
-                    Ok(reps as i32)
-                }
-            }
-            _ => Ok(0),
-        }
+        Ok(result)
     }
     fn cmd_weather(&mut self, ctx: &Context) -> R<i32> {
         let duration = Self::int(ctx, "duration");
@@ -3503,6 +3376,78 @@ fn split_top_level(s: &str, sep: char) -> Vec<&str> {
     }
     out.push(&s[start..]);
     out
+}
+
+/// TimeCommand (1.21.11) on the overworld's day time `day` and game
+/// time `game`: the new day time, the feedback key, its argument and the
+/// command's result.
+fn time_command(id: &str, ctx: &Context, day: i64, game: i64) -> (i64, &'static str, i32, i32) {
+    let day_time = |t: i64| (t % 24000) as i32;
+    let max = i64::from(i32::MAX);
+    match id {
+        "time.set" | "time.add" => {
+            let t = match () {
+                _ if ctx.has("day") => 1000,
+                _ if ctx.has("noon") => 6000,
+                _ if ctx.has("night") => 13000,
+                _ if ctx.has("midnight") => 18000,
+                _ => Game::int(ctx, "time").unwrap_or(0),
+            };
+            if id == "time.set" {
+                (i64::from(t), "commands.time.set", t, day_time(i64::from(t)))
+            } else {
+                let now = day + i64::from(t);
+                (now, "commands.time.set", day_time(now), day_time(now))
+            }
+        }
+        _ => {
+            let value = match id {
+                "time.query.gametime" => (game % max) as i32,
+                "time.query.day" => (day / 24000 % max) as i32,
+                _ => day_time(day),
+            };
+            (day, "commands.time.query", value, value)
+        }
+    }
+}
+
+#[cfg(test)]
+mod time_tests {
+    use super::time_command;
+    use horizon_client::command::{Registries, vanilla};
+
+    fn run(command: &str, day: i64) -> (i64, &'static str, i32, i32) {
+        let reg = Registries {
+            permission: 2,
+            ..Registries::default()
+        };
+        let parse = vanilla::dispatcher().parse(command, &reg);
+        let (ctx, id) = parse.executable().expect(command);
+        time_command(id, ctx, day, 77)
+    }
+
+    #[test]
+    fn time_set_names_and_queries_follow_time_command() {
+        assert_eq!(
+            run("time set noon", 100),
+            (6000, "commands.time.set", 6000, 6000)
+        );
+        assert_eq!(run("time set midnight", 0).0, 18000);
+        assert_eq!(
+            run("time set 30000", 0),
+            (30000, "commands.time.set", 30000, 6000)
+        );
+        assert_eq!(
+            run("time add 1d", 23000),
+            (47000, "commands.time.set", 23000, 23000)
+        );
+        assert_eq!(run("time query daytime", 50000).2, 2000);
+        assert_eq!(run("time query day", 50000).2, 2);
+        assert_eq!(
+            run("time query gametime", 50000),
+            (50000, "commands.time.query", 77, 77)
+        );
+    }
 }
 
 #[cfg(test)]

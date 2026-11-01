@@ -13,8 +13,6 @@ pub enum Resource {
     Enchantment,
     Structure,
     Biome,
-    Clock,
-    Timeline,
 }
 impl Resource {
     pub fn registry(self) -> &'static str {
@@ -24,8 +22,6 @@ impl Resource {
             Resource::Enchantment => "minecraft:enchantment",
             Resource::Structure => "minecraft:worldgen/structure",
             Resource::Biome => "minecraft:worldgen/biome",
-            Resource::Clock => "minecraft:world_clock",
-            Resource::Timeline => "minecraft:timeline",
         }
     }
 }
@@ -1726,7 +1722,6 @@ impl ArgType {
                     "random_sequences" => reg.random_sequences.clone(),
                     "predicates" => reg.predicates.clone(),
                     "item_modifiers" => reg.item_modifiers.clone(),
-                    "time_markers" => reg.time_markers.clone(),
                     "advancements" => reg.advancements.clone(),
                     _ => Vec::new(),
                 };
