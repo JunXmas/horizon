@@ -85,6 +85,8 @@ pub enum FeatureDefinition {
     ProjectedPatchySquare(Box<super::projected::ProjectedPatchySquareFeature>),
     SteppedColumnCluster(Box<super::projected::SteppedColumnClusterFeature>),
     FallenTree(Box<super::tree::FallenTreeFeature>),
+    /// 1.21.11's coral_tree, coral_claw and coral_mushroom (ocean_plants.rs).
+    LegacyCoral(super::ocean_plants::CoralShape, std::sync::Arc<super::ocean_plants::CoralBlocks>),
     /// 1.21.11's seagrass, kelp and sea_pickle features (ocean_plants.rs).
     OceanPlant(super::ocean_plants::OceanPlant, std::sync::Arc<super::ocean_plants::OceanBlocks>),
     /// RandomPatchFeature (1.21.11's random_patch, flower and no_bonemeal_flower; 26.1 writes
@@ -326,6 +328,20 @@ impl FeatureDefinition {
         )?)?;
         match kind.as_str() {
             "minecraft:no_op" => Ok(Self::NoOp),
+            "minecraft:coral_tree" | "minecraft:coral_claw" | "minecraft:coral_mushroom"
+                if !object.contains_key("feature") =>
+            {
+                // 1.21.11's corals: the shape picks a random coral block itself.
+                let registry = blocks.ok_or(DecodeError::Field("coral bindings"))?.registry();
+                let shape = match kind.as_str() {
+                    "minecraft:coral_tree" => super::ocean_plants::CoralShape::Tree,
+                    "minecraft:coral_claw" => super::ocean_plants::CoralShape::Claw,
+                    _ => super::ocean_plants::CoralShape::Mushroom,
+                };
+                let corals = super::ocean_plants::CoralBlocks::new(registry)
+                    .map_err(|e| DecodeError::Registry(e.to_string()))?;
+                Ok(Self::LegacyCoral(shape, std::sync::Arc::new(corals)))
+            }
             "minecraft:seagrass" | "minecraft:kelp" | "minecraft:sea_pickle" => {
                 let registry = blocks.ok_or(DecodeError::Field("ocean plant bindings"))?.registry();
                 let plant = match kind.as_str() {
@@ -1122,6 +1138,9 @@ impl FeatureDefinition {
                 Some(feature) => feature.place_in(&mut placer, world, random, origin, run),
                 None => Ok(false),
             },
+            Self::LegacyCoral(shape, corals) => shape
+                .place(corals, world, random, origin)
+                .map_err(FeatureExecutionError::OceanPlant),
             Self::OceanPlant(plant, ocean) => plant
                 .place(ocean, world, random, origin)
                 .map_err(FeatureExecutionError::OceanPlant),

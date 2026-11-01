@@ -5,10 +5,9 @@ use serde_json::{Map, Value, json};
 /// Feature types 26.3 dropped for compositions of other features; a pack
 /// using them needs vanilla's composition, which the upgrade does not
 /// write.
-const REPLACED_FEATURES: [&str; 8] = [
+const REPLACED_FEATURES: [&str; 7] = [
     "basalt_columns",
     "basalt_pillar",
-    "coral_mushroom",
     "desert_well",
     "glowstone_blob",
     "nether_forest_vegetation",
@@ -195,8 +194,10 @@ fn nested(v: &mut Value, report: &mut Report) {
                     }
                     o.insert("type".into(), vanilla(to));
                     // Noise providers carry their noise parameters inline, in the old form.
-                    if let Some(n) = o.get("noise").filter(|n| n.get("firstOctave").is_some()).cloned() {
-                        o.insert("noise".into(), super::noise::noise(&n, report));
+                    for key in ["noise", "slow_noise"] {
+                        if let Some(n) = o.get(key).filter(|n| n.get("firstOctave").is_some()).cloned() {
+                            o.insert(key.into(), super::noise::noise(&n, report));
+                        }
                     }
                     }
             }
