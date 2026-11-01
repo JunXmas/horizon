@@ -239,6 +239,8 @@ impl FeatureCatalog {
                     self.expand_placed(required(&object, "vegetation_feature")?, depth + 1, work)?;
                 object.insert("vegetation_feature".into(), raw(expanded)?);
             }
+            // 1.21.11's coral_tree and coral_claw carry no nested feature.
+            "minecraft:coral_tree" | "minecraft:coral_claw" if !object.contains_key("feature") => {}
             "minecraft:coral_tree" | "minecraft:coral_claw" | "minecraft:root_system" => {
                 let expanded =
                     self.expand_placed(required(&object, "feature")?, depth + 1, work)?;
